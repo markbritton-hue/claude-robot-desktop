@@ -17,6 +17,8 @@ const rateVal      = document.getElementById('rate-val');
 const pitchVal     = document.getElementById('pitch-val');
 const memoryList   = document.getElementById('memory-list');
 const clearMemBtn  = document.getElementById('clear-memory-btn');
+const memoryCount  = document.getElementById('memory-count');
+const memoryCountS = document.getElementById('memory-count-s');
 
 // Settings panel toggle
 wrenchBtn.addEventListener('click', e => {
@@ -73,6 +75,8 @@ function speak(text) {
 // --- Memory ---
 async function refreshMemoryList() {
   const facts = await window.electron.getMemory();
+  memoryCount.textContent = facts.length;
+  memoryCountS.textContent = facts.length === 1 ? '' : 's';
   memoryList.innerHTML = '';
   if (!facts.length) {
     memoryList.innerHTML = '<div class="memory-empty">Nothing remembered yet.<br>Say "remember…" to save something.</div>';

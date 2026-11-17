@@ -7,14 +7,27 @@ const os = require('os');
 const https = require('https');
 const Anthropic = require('@anthropic-ai/sdk');
 
+// Firebase
+const { initializeApp: initFirebase } = require('firebase/app');
+const { getFirestore, doc, getDoc, setDoc, collection, getDocs, addDoc, deleteDoc, query } = require('firebase/firestore');
+
+const firebaseApp = initFirebase({
+  apiKey: process.env.FIREBASE_API_KEY,
+  authDomain: 'clauderobot.firebaseapp.com',
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  storageBucket: 'clauderobot.firebasestorage.app',
+  messagingSenderId: '719034857796',
+  appId: '1:719034857796:web:ff0880355d421736ffbf11',
+});
+const db = getFirestore(firebaseApp);
+const USER_DOC = 'users/mark';
+
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const history = [];
 
-// --- Notify helper (toast + IPC to robot) ---
+// --- Notify helper ---
 function notify(title, body, speak = true) {
-  if (Notification.isSupported()) {
-    new Notification({ title, body, silent: true }).show();
-  }
+  if (Notification.isSupported()) new Notification({ title, body, silent: true }).show();
   if (win) win.webContents.send('monitor-alert', { title, body, speak });
 }
 
@@ -34,20 +47,21 @@ function watchStatus() {
   });
 }
 
-// --- Persistent memory ---
-let memoryPath;
+// --- Memory (Firestore) ---
 let memory = { facts: [] };
 
-function loadMemory() {
+async function loadMemory() {
   try {
-    const raw = fs.readFileSync(memoryPath, 'utf8');
-    memory = JSON.parse(raw);
-    if (!Array.isArray(memory.facts)) memory.facts = [];
+    const snap = await getDoc(doc(db, USER_DOC));
+    if (snap.exists()) {
+      memory = snap.data();
+      if (!Array.isArray(memory.facts)) memory.facts = [];
+    }
   } catch { memory = { facts: [] }; }
 }
 
-function saveMemory() {
-  fs.writeFileSync(memoryPath, JSON.stringify(memory, null, 2), 'utf8');
+async function saveMemory() {
+  await setDoc(doc(db, USER_DOC), memory, { merge: true });
 }
 
 function memorySystemPrompt() {
@@ -56,53 +70,65 @@ function memorySystemPrompt() {
 }
 
 ipcMain.handle('get-memory', () => memory.facts);
-ipcMain.handle('save-fact', (_, fact) => {
+
+ipcMain.handle('save-fact', async (_, fact) => {
   const trimmed = fact.trim();
-  if (trimmed && !memory.facts.includes(trimmed)) { memory.facts.push(trimmed); saveMemory(); }
+  if (trimmed && !memory.facts.includes(trimmed)) {
+    memory.facts.push(trimmed);
+    await saveMemory();
+  }
   return memory.facts;
 });
-ipcMain.handle('delete-fact', (_, index) => { memory.facts.splice(index, 1); saveMemory(); return memory.facts; });
-ipcMain.handle('clear-memory', () => { memory.facts = []; saveMemory(); return memory.facts; });
 
-// --- Reminders ---
-let remindersPath;
+ipcMain.handle('delete-fact', async (_, index) => {
+  memory.facts.splice(index, 1);
+  await saveMemory();
+  return memory.facts;
+});
+
+ipcMain.handle('clear-memory', async () => {
+  memory.facts = [];
+  await saveMemory();
+  return memory.facts;
+});
+
+// --- Reminders (Firestore) ---
 let reminders = [];
 
-function loadReminders() {
-  try { reminders = JSON.parse(fs.readFileSync(remindersPath, 'utf8')); }
-  catch { reminders = []; }
-}
-
-function saveReminders() {
-  fs.writeFileSync(remindersPath, JSON.stringify(reminders, null, 2), 'utf8');
+async function loadReminders() {
+  try {
+    const snap = await getDocs(query(collection(db, `${USER_DOC}/reminders`)));
+    reminders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch { reminders = []; }
 }
 
 ipcMain.handle('get-reminders', () => reminders);
-ipcMain.handle('add-reminder', (_, { text, time }) => {
-  reminders.push({ id: Date.now(), text, time, fired: false });
-  saveReminders();
+
+ipcMain.handle('add-reminder', async (_, { text, time }) => {
+  const docRef = await addDoc(collection(db, `${USER_DOC}/reminders`), { text, time, fired: false });
+  reminders.push({ id: docRef.id, text, time, fired: false });
   return reminders;
 });
-ipcMain.handle('delete-reminder', (_, id) => {
+
+ipcMain.handle('delete-reminder', async (_, id) => {
+  await deleteDoc(doc(db, `${USER_DOC}/reminders/${id}`));
   reminders = reminders.filter(r => r.id !== id);
-  saveReminders();
   return reminders;
 });
 
 function checkReminders() {
   const now = Date.now();
-  let changed = false;
   for (const r of reminders) {
     if (!r.fired && r.time <= now) {
       r.fired = true;
-      changed = true;
+      deleteDoc(doc(db, `${USER_DOC}/reminders/${r.id}`)).catch(() => {});
+      reminders = reminders.filter(x => x.id !== r.id);
       notify('Reminder', r.text, true);
     }
   }
-  if (changed) saveReminders();
 }
 
-// --- Weather monitoring (Open-Meteo, Three Rivers MI) ---
+// --- Weather monitoring ---
 const WEATHER_LAT = 41.9439;
 const WEATHER_LON = -85.6333;
 let lastWeatherCode = -1;
@@ -178,11 +204,6 @@ ipcMain.handle('start-listening', () => {
 let win;
 
 function createWindow() {
-  memoryPath    = path.join(app.getPath('userData'), 'memory.json');
-  remindersPath = path.join(app.getPath('userData'), 'reminders.json');
-  loadMemory();
-  loadReminders();
-
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   win = new BrowserWindow({
     width: 300, height: 500,
@@ -194,14 +215,14 @@ function createWindow() {
 
   win.loadFile('renderer/index.html');
   win.setIgnoreMouseEvents(false);
-  win.webContents.once('did-finish-load', () => {
+
+  win.webContents.once('did-finish-load', async () => {
+    await loadMemory();
+    await loadReminders();
     watchStatus();
-    // Start monitors
     fetchWeather();
-    setInterval(checkReminders, 30000);        // reminders every 30s
-    setInterval(fetchWeather, 30 * 60 * 1000); // weather every 30min
-    // Weather test — fires 3 seconds after load
-    setTimeout(() => notify('Weather Alert', 'Thunderstorm outside! — 58°F', true), 3000);
+    setInterval(checkReminders, 30000);
+    setInterval(fetchWeather, 30 * 60 * 1000);
   });
 
   win.webContents.session.setPermissionRequestHandler((wc, permission, callback) => {
