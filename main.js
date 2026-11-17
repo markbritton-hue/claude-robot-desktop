@@ -246,7 +246,7 @@ async function getCalendarAuth() {
   // First run — open browser for auth
   const authUrl = oAuth2.generateAuthUrl({
     access_type: 'offline',
-    scope: ['https://www.googleapis.com/auth/calendar.readonly'],
+    scope: ['https://www.googleapis.com/auth/calendar'],
   });
 
   const { shell } = require('electron');
