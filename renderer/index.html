@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Claude Robot</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: transparent;
+      overflow: hidden;
+      width: 300px;
+      height: 500px;
+      font-family: 'Segoe UI', sans-serif;
+      user-select: none;
+    }
+
+    #three-canvas {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 300px;
+      height: 300px;
+      pointer-events: none; /* let clicks pass through to overlay */
+      z-index: 10;
+    }
+
+    /* Click overlay — needs rgba(0,0,0,0.01) so Windows doesn't treat it as click-through */
+    #robot-click-area {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 300px;
+      height: 300px;
+      cursor: pointer;
+      z-index: 15;
+      background: rgba(0,0,0,0.01);
+    }
+
+    /* Wrench button — sits ON the robot, bottom-right */
+    #wrench-btn {
+      position: absolute;
+      bottom: 12px;
+      right: 12px;
+      background: rgba(20,20,28,0.85);
+      border: 1.5px solid rgba(255,255,255,0.2);
+      border-radius: 50%;
+      font-size: 15px;
+      width: 34px;
+      height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      z-index: 50;
+      transition: background 0.2s, border-color 0.2s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    }
+    #wrench-btn:hover { background: rgba(224,92,42,0.5); border-color: #e05c2a; }
+
+    /* Settings popup — appears near robot head */
+    #settings-panel {
+      position: absolute;
+      bottom: 195px;
+      right: 8px;
+      width: 210px;
+      background: rgba(12,12,18,0.98);
+      border: 1px solid rgba(224,92,42,0.6);
+      border-radius: 12px;
+      padding: 14px;
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      z-index: 50;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+    }
+    #settings-panel.open { display: flex; }
+
+    .settings-title {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #e05c2a;
+    }
+
+    .setting-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .setting-row label {
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+    }
+    .setting-row select,
+    .setting-row input[type=range] {
+      width: 100%;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+      color: rgba(255,255,255,0.8);
+      font-size: 12px;
+      padding: 5px 8px;
+      outline: none;
+    }
+    .setting-row select:focus { border-color: #e05c2a; }
+    .setting-row input[type=range] {
+      padding: 4px 0;
+      accent-color: #e05c2a;
+    }
+
+    #close-settings {
+      position: absolute;
+      top: 8px; right: 10px;
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.3);
+      font-size: 14px;
+      cursor: pointer;
+    }
+    #close-settings:hover { color: rgba(255,255,255,0.7); }
+
+    /* Memory list */
+    #memory-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 100px;
+      overflow-y: auto;
+    }
+    .memory-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: rgba(255,255,255,0.75);
+      background: rgba(255,255,255,0.05);
+      border-radius: 5px;
+      padding: 4px 6px;
+    }
+    .memory-item span { flex: 1; }
+    .memory-del {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.3);
+      font-size: 11px;
+      cursor: pointer;
+      padding: 0 2px;
+      line-height: 1;
+    }
+    .memory-del:hover { color: #e05c2a; }
+    .memory-empty { font-size: 11px; color: rgba(255,255,255,0.3); line-height: 1.5; }
+    #clear-memory-btn {
+      background: rgba(224,92,42,0.15);
+      border: 1px solid rgba(224,92,42,0.4);
+      border-radius: 5px;
+      color: #e05c2a;
+      font-size: 11px;
+      padding: 4px 8px;
+      cursor: pointer;
+      align-self: flex-start;
+    }
+    #clear-memory-btn:hover { background: rgba(224,92,42,0.3); }
+
+    /* Speech bubble — just above the robot's head */
+    #bubble {
+      position: absolute;
+      top: 220px;
+      left: 10px;
+      right: 10px;
+      background: rgba(20,20,28,0.95);
+      border: 2px solid #e05c2a;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 13px;
+      color: rgba(255,255,255,0.92);
+      line-height: 1.5;
+      opacity: 0;
+      transform: translateY(6px) scale(0.95);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      pointer-events: none;
+      max-height: 110px;
+      overflow: hidden;
+    }
+    #bubble::after {
+      content: '';
+      position: absolute;
+      bottom: -11px;
+      left: 50%;
+      transform: translateX(-50%);
+      border-left: 8px solid transparent;
+      border-right: 8px solid transparent;
+      border-top: 11px solid #e05c2a;
+    }
+    #bubble.show { opacity: 1; transform: translateY(0) scale(1); }
+    #bubble.state-chat        { border-color: #4ade80; }
+    #bubble.state-chat::after { border-top-color: #4ade80; }
+    #bubble.state-thinking    { border-color: #8b5cf6; color: rgba(200,180,255,0.9); font-style: italic; }
+    #bubble.state-thinking::after { border-top-color: #8b5cf6; }
+
+    /* Chat panel */
+    #chat-panel {
+      position: absolute;
+      bottom: 195px;
+      left: 10px;
+      right: 10px;
+      background: rgba(12,12,18,0.97);
+      border: 1px solid rgba(224,92,42,0.5);
+      border-radius: 12px;
+      padding: 10px;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 20;
+    }
+    #chat-panel.open { display: flex; }
+
+    #chat-log {
+      max-height: 110px;
+      overflow-y: auto;
+      font-size: 12px;
+      color: rgba(255,255,255,0.8);
+      line-height: 1.6;
+    }
+    #chat-log .you { color: #e05c2a; margin-bottom: 2px; }
+    #chat-log .bot { color: rgba(255,255,255,0.75); margin-bottom: 4px; }
+
+    #chat-input-row { display: flex; gap: 6px; }
+
+    #chat-input {
+      flex: 1;
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 6px;
+      color: #fff;
+      font-size: 12px;
+      padding: 6px 8px;
+      outline: none;
+    }
+    #chat-input:focus { border-color: #e05c2a; }
+
+    #chat-send {
+      background: #e05c2a;
+      border: none;
+      border-radius: 6px;
+      color: #000;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 6px 10px;
+      cursor: pointer;
+    }
+    #chat-send:hover { background: #f07040; }
+
+    #close-chat {
+      position: absolute;
+      top: 6px; right: 8px;
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.3);
+      font-size: 14px;
+      cursor: pointer;
+    }
+    #close-chat:hover { color: rgba(255,255,255,0.7); }
+
+    #mic-btn {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 6px;
+      color: rgba(255,255,255,0.6);
+      font-size: 15px;
+      padding: 6px 10px;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+    }
+    #mic-btn:hover { background: rgba(255,255,255,0.15); }
+    #mic-btn.listening {
+      background: rgba(224,92,42,0.3);
+      border-color: #e05c2a;
+      color: #e05c2a;
+      animation: mic-pulse 1s ease-in-out infinite;
+    }
+    @keyframes mic-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(224,92,42,0.4); }
+      50%       { box-shadow: 0 0 0 6px rgba(224,92,42,0); }
+    }
+  </style>
+</head>
+<body>
+  <!-- Robot canvas sits behind everything -->
+  <div id="three-canvas"></div>
+  <!-- Transparent overlay to catch robot clicks -->
+  <div id="robot-click-area"></div>
+
+  <div id="bubble"></div>
+
+  <div id="chat-panel">
+    <button id="close-chat">✕</button>
+    <div id="chat-log"></div>
+    <div id="chat-input-row">
+      <button id="mic-btn" title="Click to speak">🎤</button>
+      <input id="chat-input" type="text" placeholder="Say something…" autocomplete="off">
+      <button id="chat-send">Send</button>
+    </div>
+  </div>
+
+  <!-- Wrench settings button -->
+  <button id="wrench-btn" title="Settings">🔧</button>
+
+  <!-- Settings popup -->
+  <div id="settings-panel">
+    <button id="close-settings">✕</button>
+    <div class="settings-title">Settings</div>
+    <div class="setting-row">
+      <label>Voice</label>
+      <select id="voice-select"></select>
+    </div>
+    <div class="setting-row">
+      <label>Speed — <span id="rate-val">1.0</span>x</label>
+      <input type="range" id="rate-slider" min="0.5" max="2.0" step="0.1" value="1.0">
+    </div>
+    <div class="setting-row">
+      <label>Pitch — <span id="pitch-val">1.0</span></label>
+      <input type="range" id="pitch-slider" min="0.5" max="2.0" step="0.1" value="1.0">
+    </div>
+    <div class="setting-row">
+      <label>Memory</label>
+      <div id="memory-list"></div>
+      <button id="clear-memory-btn">Clear all</button>
+    </div>
+  </div>
+
+  <script type="module" src="robot.js"></script>
+  <script src="chat.js"></script>
+</body>
+</html>

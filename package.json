@@ -1,0 +1,16 @@
+{
+  "name": "clauderobot-desktop",
+  "version": "1.0.0",
+  "description": "Interactive 3D Claude robot desktop companion",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.36.3",
+    "@elevenlabs/elevenlabs-js": "^2.79.0",
+    "dotenv": "^18.0.10",
+    "electron": "^33.0.0",
+    "three": "^0.170.0"
+  }
+}
