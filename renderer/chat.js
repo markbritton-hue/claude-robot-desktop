@@ -7,6 +7,7 @@ const bubble       = document.getElementById('bubble');
 const canvas       = document.getElementById('robot-click-area');
 const micBtn       = document.getElementById('mic-btn');
 const wrenchBtn    = document.getElementById('wrench-btn');
+const muteBtn      = document.getElementById('mute-btn');
 const settingsPanel= document.getElementById('settings-panel');
 const closeSettings= document.getElementById('close-settings');
 const voiceSelect  = document.getElementById('voice-select');
@@ -29,6 +30,16 @@ rateSlider.addEventListener('input', () => rateVal.textContent = parseFloat(rate
 pitchSlider.addEventListener('input', () => pitchVal.textContent = parseFloat(pitchSlider.value).toFixed(1));
 
 let bubbleTimer = null;
+let chatAutoCloseTimer = null;
+let muted = false;
+
+muteBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  muted = !muted;
+  muteBtn.textContent = muted ? '🔇' : '🔊';
+  muteBtn.classList.toggle('muted', muted);
+  if (muted) window.speechSynthesis.cancel();
+});
 
 // --- Voice ---
 function populateVoices() {
@@ -49,6 +60,7 @@ window.speechSynthesis.onvoiceschanged = populateVoices;
 populateVoices();
 
 function speak(text) {
+  if (muted) return;
   window.speechSynthesis.cancel();
   const voices = window.speechSynthesis.getVoices().filter(v => v.lang.startsWith('en'));
   const utter = new SpeechSynthesisUtterance(text);
@@ -89,10 +101,33 @@ clearMemBtn.addEventListener('click', async () => {
   refreshMemoryList();
 });
 
-// Detect "remember X" commands in user messages
+// Detect "remember X" commands
 function extractRememberFact(text) {
   const m = text.match(/^(?:please\s+)?remember\s+(?:that\s+)?(.+)/i);
   return m ? m[1].trim() : null;
+}
+
+// Parse "remind me at 3pm to call Bob" or "remind me in 10 minutes to..."
+function parseReminder(text) {
+  // "remind me in X minutes/hours to ..."
+  let m = text.match(/^remind\s+me\s+in\s+(\d+)\s+(minute|minutes|hour|hours)\s+to\s+(.+)/i);
+  if (m) {
+    const amount = parseInt(m[1]);
+    const unit = m[2].toLowerCase().startsWith('h') ? 3600000 : 60000;
+    return { reminderText: m[3].trim(), time: Date.now() + amount * unit };
+  }
+  // "remind me at 3pm / 3:30pm / 15:00 to ..."
+  m = text.match(/^remind\s+me\s+at\s+([\d:]+\s*(?:am|pm)?)\s+to\s+(.+)/i);
+  if (m) {
+    const timeStr = m[1].trim();
+    const reminderText = m[2].trim();
+    const now = new Date();
+    let target = new Date(now.toDateString() + ' ' + timeStr);
+    if (isNaN(target)) return null;
+    if (target <= now) target.setDate(target.getDate() + 1); // push to tomorrow if past
+    return { reminderText, time: target.getTime() };
+  }
+  return null;
 }
 
 // --- Bubble ---
@@ -131,6 +166,18 @@ async function sendMessage() {
     return;
   }
 
+  // Check for "remind me" command
+  const reminder = parseReminder(text);
+  if (reminder) {
+    await window.electron.addReminder(reminder.reminderText, reminder.time);
+    const when = new Date(reminder.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const ack = `Got it! I'll remind you to ${reminder.reminderText} at ${when}.`;
+    addLog('bot', ack);
+    showBubble(ack, 'state-chat');
+    speak(ack);
+    return;
+  }
+
   showBubble('Thinking...', 'state-thinking');
   try {
     const reply = await window.electron.sendChat(text);
@@ -144,11 +191,34 @@ async function sendMessage() {
 
 sendBtn.addEventListener('click', sendMessage);
 input.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
-closeBtn.addEventListener('click', () => panel.classList.remove('open'));
+
+function resetChatAutoClose() {
+  if (chatAutoCloseTimer) clearTimeout(chatAutoCloseTimer);
+  chatAutoCloseTimer = setTimeout(() => panel.classList.remove('open'), 20000);
+}
 
 canvas.addEventListener('click', () => {
   panel.classList.toggle('open');
-  if (panel.classList.contains('open')) setTimeout(() => input.focus(), 50);
+  if (panel.classList.contains('open')) {
+    setTimeout(() => input.focus(), 50);
+    resetChatAutoClose();
+  } else {
+    if (chatAutoCloseTimer) clearTimeout(chatAutoCloseTimer);
+  }
+});
+
+// Reset timer on any interaction inside the panel
+input.addEventListener('keydown', resetChatAutoClose);
+input.addEventListener('focus', resetChatAutoClose);
+closeBtn.addEventListener('click', () => {
+  if (chatAutoCloseTimer) clearTimeout(chatAutoCloseTimer);
+  panel.classList.remove('open');
+});
+
+// --- Monitor alerts (email, weather, reminders) ---
+window.electron.onMonitorAlert(({ title, body, speak: shouldSpeak }) => {
+  showBubble(`${title}: ${body}`, 'state-chat');
+  if (shouldSpeak) speak(`${title}. ${body}`);
 });
 
 // --- Claude activity status from OBS overlay ---

@@ -58,6 +58,27 @@
     }
     #wrench-btn:hover { background: rgba(224,92,42,0.5); border-color: #e05c2a; }
 
+    #mute-btn {
+      position: absolute;
+      bottom: 12px;
+      right: 52px;
+      background: rgba(20,20,28,0.85);
+      border: 1.5px solid rgba(255,255,255,0.2);
+      border-radius: 50%;
+      font-size: 15px;
+      width: 34px;
+      height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      z-index: 50;
+      transition: background 0.2s, border-color 0.2s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    }
+    #mute-btn:hover { background: rgba(224,92,42,0.5); border-color: #e05c2a; }
+    #mute-btn.muted { background: rgba(224,92,42,0.3); border-color: #e05c2a; }
+
     /* Settings popup — appears near robot head */
     #settings-panel {
       position: absolute;
@@ -303,6 +324,9 @@
       <button id="chat-send">Send</button>
     </div>
   </div>
+
+  <!-- Mute button -->
+  <button id="mute-btn" title="Mute/Unmute">🔊</button>
 
   <!-- Wrench settings button -->
   <button id="wrench-btn" title="Settings">🔧</button>
