@@ -6,10 +6,11 @@ const fs = require('fs');
 const os = require('os');
 const https = require('https');
 const Anthropic = require('@anthropic-ai/sdk');
+const { google } = require('googleapis');
 
 // Firebase
 const { initializeApp: initFirebase } = require('firebase/app');
-const { getFirestore, doc, getDoc, setDoc, collection, getDocs, addDoc, deleteDoc, query } = require('firebase/firestore');
+const { getFirestore, doc, getDoc, setDoc, collection, getDocs, addDoc, deleteDoc, query, orderBy, limit } = require('firebase/firestore');
 
 const firebaseApp = initFirebase({
   apiKey: process.env.FIREBASE_API_KEY,
@@ -161,9 +162,34 @@ function fetchWeather() {
   }).on('error', () => {});
 }
 
+// --- Conversation history (Firestore) ---
+async function loadHistory() {
+  try {
+    const snap = await getDocs(query(
+      collection(db, `${USER_DOC}/conversations`),
+      orderBy('ts'), limit(20)
+    ));
+    snap.docs.forEach(d => history.push(d.data().msg));
+  } catch {}
+}
+
+async function saveMessage(msg) {
+  try {
+    await addDoc(collection(db, `${USER_DOC}/conversations`), { msg, ts: Date.now() });
+    // Keep only last 40 messages in Firestore
+    const snap = await getDocs(query(collection(db, `${USER_DOC}/conversations`), orderBy('ts')));
+    if (snap.docs.length > 40) {
+      const toDelete = snap.docs.slice(0, snap.docs.length - 40);
+      for (const d of toDelete) await deleteDoc(d.ref);
+    }
+  } catch {}
+}
+
 // --- Chat ---
 ipcMain.handle('chat-message', async (_, userMsg) => {
   history.push({ role: 'user', content: userMsg });
+  await saveMessage({ role: 'user', content: userMsg });
+
   const res = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 256,
@@ -172,7 +198,8 @@ ipcMain.handle('chat-message', async (_, userMsg) => {
   });
   const reply = res.content[0].text;
   history.push({ role: 'assistant', content: reply });
-  if (history.length > 20) history.splice(0, 2);
+  await saveMessage({ role: 'assistant', content: reply });
+  if (history.length > 40) history.splice(0, 2);
   return reply;
 });
 
@@ -201,6 +228,74 @@ ipcMain.handle('start-listening', () => {
   });
 });
 
+// --- Google Calendar ---
+const GCREDS_PATH = path.join(__dirname, 'google-credentials.json');
+const GTOKEN_PATH = path.join(__dirname, 'google-token.json');
+let calendarAuth = null;
+
+async function getCalendarAuth() {
+  if (!fs.existsSync(GCREDS_PATH)) return null;
+  const { client_id, client_secret, redirect_uris } = JSON.parse(fs.readFileSync(GCREDS_PATH)).installed;
+  const oAuth2 = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
+
+  if (fs.existsSync(GTOKEN_PATH)) {
+    oAuth2.setCredentials(JSON.parse(fs.readFileSync(GTOKEN_PATH)));
+    return oAuth2;
+  }
+
+  // First run — open browser for auth
+  const authUrl = oAuth2.generateAuthUrl({
+    access_type: 'offline',
+    scope: ['https://www.googleapis.com/auth/calendar.readonly'],
+  });
+
+  const { shell } = require('electron');
+  shell.openExternal(authUrl);
+
+  // Listen on localhost for the redirect code
+  return new Promise((resolve) => {
+    const http = require('http');
+    const server = http.createServer(async (req, res) => {
+      const code = new URL(req.url, 'http://localhost').searchParams.get('code');
+      if (!code) { res.end('No code'); return; }
+      res.end('<h2>Authorized! You can close this tab.</h2>');
+      server.close();
+      const { tokens } = await oAuth2.getToken(code);
+      oAuth2.setCredentials(tokens);
+      fs.writeFileSync(GTOKEN_PATH, JSON.stringify(tokens));
+      calendarAuth = oAuth2;
+      resolve(oAuth2);
+    });
+    server.listen(80, () => console.log('Waiting for Google auth on port 80...'));
+  });
+}
+
+async function checkCalendar() {
+  if (!calendarAuth) return;
+  try {
+    const cal = google.calendar({ version: 'v3', auth: calendarAuth });
+    const now = new Date();
+    const soon = new Date(now.getTime() + 15 * 60 * 1000); // next 15 min
+    const res = await cal.events.list({
+      calendarId: 'primary',
+      timeMin: now.toISOString(),
+      timeMax: soon.toISOString(),
+      singleEvents: true,
+      orderBy: 'startTime',
+    });
+    const events = res.data.items || [];
+    for (const ev of events) {
+      const start = ev.start.dateTime || ev.start.date;
+      const startTime = new Date(start);
+      const minsAway = Math.round((startTime - now) / 60000);
+      const label = minsAway <= 1 ? 'starting now' : `in ${minsAway} minutes`;
+      notify('Calendar', `${ev.summary} ${label}`, true);
+    }
+  } catch (e) {
+    console.error('[calendar]', e.message);
+  }
+}
+
 let win;
 
 function createWindow() {
@@ -219,10 +314,18 @@ function createWindow() {
   win.webContents.once('did-finish-load', async () => {
     await loadMemory();
     await loadReminders();
+    await loadHistory();
     watchStatus();
     fetchWeather();
     setInterval(checkReminders, 30000);
     setInterval(fetchWeather, 30 * 60 * 1000);
+    getCalendarAuth().then(auth => {
+      if (auth) {
+        calendarAuth = auth;
+        checkCalendar();
+        setInterval(checkCalendar, 5 * 60 * 1000); // check every 5 min
+      }
+    });
   });
 
   win.webContents.session.setPermissionRequestHandler((wc, permission, callback) => {
