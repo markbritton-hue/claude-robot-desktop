@@ -184,6 +184,24 @@ function checkReminders() {
 const WEATHER_LAT = 41.9439;
 const WEATHER_LON = -85.6333;
 let lastWeatherCode = -1;
+let lastWeatherTemp = null;
+
+const WMO_DESC = {
+  0: 'Clear sky', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
+  45: 'Foggy', 48: 'Freezing fog',
+  51: 'Light drizzle', 53: 'Drizzle', 55: 'Heavy drizzle',
+  61: 'Light rain', 63: 'Rain', 65: 'Heavy rain',
+  71: 'Light snow', 73: 'Snow', 75: 'Heavy snow',
+  77: 'Snow grains',
+  80: 'Rain showers', 81: 'Rain showers', 82: 'Violent rain showers',
+  85: 'Snow showers', 86: 'Heavy snow showers',
+  95: 'Thunderstorm', 96: 'Thunderstorm with hail', 99: 'Severe thunderstorm',
+};
+
+ipcMain.handle('get-weather', () => {
+  if (lastWeatherTemp === null) return null;
+  return { temp: lastWeatherTemp, code: lastWeatherCode, desc: WMO_DESC[lastWeatherCode] || 'Unknown' };
+});
 
 const WEATHER_ALERTS = {
   51: 'Light drizzle starting', 53: 'Drizzle outside', 55: 'Heavy drizzle outside',
@@ -203,6 +221,7 @@ function fetchWeather() {
         const json = JSON.parse(data);
         const code = json.current.weather_code;
         const temp = Math.round(json.current.temperature_2m);
+        lastWeatherTemp = temp;
         if (code !== lastWeatherCode) {
           lastWeatherCode = code;
           const alert = WEATHER_ALERTS[code];

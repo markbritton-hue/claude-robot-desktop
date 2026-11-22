@@ -228,6 +228,20 @@ async function sendMessage() {
     return;
   }
 
+  // Check for weather question
+  if (/weather|temperature|temp|how (hot|cold|warm)|what('?s| is) it like outside/i.test(text)) {
+    const w = await window.electron.getWeather();
+    const reply = w
+      ? `It's ${w.temp}°F and ${w.desc.toLowerCase()} in Three Rivers right now.`
+      : "I haven't fetched the weather yet — give me a moment and try again!";
+    addLog('bot', reply);
+    showBubble(reply, 'state-chat');
+    speak(reply);
+    setMood('happy');
+    setTimeout(() => setMood('idle'), 8000);
+    return;
+  }
+
   // Check for "remind me" command
   const reminder = parseReminder(text);
   if (reminder) {
