@@ -7,6 +7,7 @@ const os = require('os');
 const https = require('https');
 const Anthropic = require('@anthropic-ai/sdk');
 const { google } = require('googleapis');
+const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 
 // Firebase
 const { initializeApp: initFirebase } = require('firebase/app');
@@ -251,6 +252,42 @@ ipcMain.handle('chat-message', async (_, userMsg) => {
   await saveMessage({ role: 'assistant', content: reply });
   if (history.length > 40) history.splice(0, 2);
   return reply;
+});
+
+// --- Edge TTS ---
+const EDGE_VOICES = [
+  { id: 'en-US-JennyNeural',   name: 'Jenny (US Female)' },
+  { id: 'en-US-GuyNeural',     name: 'Guy (US Male)' },
+  { id: 'en-US-AriaNeural',    name: 'Aria (US Female)' },
+  { id: 'en-GB-SoniaNeural',   name: 'Sonia (UK Female)' },
+  { id: 'en-GB-RyanNeural',    name: 'Ryan (UK Male)' },
+  { id: 'en-AU-NatashaNeural', name: 'Natasha (AU Female)' },
+];
+
+ipcMain.handle('get-edge-voices', () => EDGE_VOICES);
+
+ipcMain.handle('speak-edge', async (_, { text, voiceId, rate, pitch }) => {
+  try {
+    const tts = new MsEdgeTTS();
+    const voice = voiceId || 'en-US-JennyNeural';
+    const rateStr = rate !== undefined ? `${rate > 0 ? '+' : ''}${Math.round((rate - 1) * 100)}%` : '+0%';
+    const pitchStr = pitch !== undefined ? `${pitch > 0 ? '+' : ''}${Math.round((pitch - 1) * 50)}Hz` : '+0Hz';
+    await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3, `<prosody rate="${rateStr}" pitch="${pitchStr}">${text}</prosody>`);
+    const tmpFile = path.join(os.tmpdir(), `claude-speak-${Date.now()}.mp3`);
+    await new Promise((resolve, reject) => {
+      const readable = tts.toStream();
+      const chunks = [];
+      readable.on('data', d => chunks.push(d));
+      readable.on('end', () => { fs.writeFileSync(tmpFile, Buffer.concat(chunks)); resolve(); });
+      readable.on('error', reject);
+    });
+    const buf = fs.readFileSync(tmpFile);
+    fs.unlinkSync(tmpFile);
+    return buf.toString('base64');
+  } catch (e) {
+    console.error('[edge-tts]', e.message);
+    return null;
+  }
 });
 
 // --- Speech recognition ---

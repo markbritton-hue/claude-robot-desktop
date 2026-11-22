@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('electron', {
   moveWindow: (x, y) => ipcRenderer.send('move-window', { x, y }),
   getMemory: () => ipcRenderer.invoke('get-memory'),
   getHistory: () => ipcRenderer.invoke('get-history'),
+  getEdgeVoices: () => ipcRenderer.invoke('get-edge-voices'),
+  speakEdge: (text, voiceId, rate, pitch) => ipcRenderer.invoke('speak-edge', { text, voiceId, rate, pitch }),
   saveFact: (fact) => ipcRenderer.invoke('save-fact', fact),
   deleteFact: (index) => ipcRenderer.invoke('delete-fact', index),
   clearMemory: () => ipcRenderer.invoke('clear-memory'),

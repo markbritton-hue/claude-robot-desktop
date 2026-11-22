@@ -59,36 +59,36 @@ muteBtn.addEventListener('click', e => {
   muted = !muted;
   muteBtn.textContent = muted ? '🔇' : '🔊';
   muteBtn.classList.toggle('muted', muted);
-  if (muted) window.speechSynthesis.cancel();
+  if (muted && currentAudio) { currentAudio.pause(); currentAudio = null; }
 });
 
-// --- Voice ---
-function populateVoices() {
-  const voices = window.speechSynthesis.getVoices().filter(v => v.lang.startsWith('en'));
-  if (!voices.length) return;
+// --- Voice (Microsoft Edge Neural TTS) ---
+let edgeVoices = [];
+let currentAudio = null;
+
+async function populateVoices() {
+  edgeVoices = await window.electron.getEdgeVoices();
   voiceSelect.innerHTML = '';
-  voices.forEach((v, i) => {
+  edgeVoices.forEach((v, i) => {
     const opt = document.createElement('option');
     opt.value = i;
     opt.textContent = v.name;
     voiceSelect.appendChild(opt);
   });
-  const davidIdx = voices.findIndex(v => v.name.includes('David'));
-  if (davidIdx >= 0) voiceSelect.value = davidIdx;
 }
 
-window.speechSynthesis.onvoiceschanged = populateVoices;
 populateVoices();
 
-function speak(text) {
+async function speak(text) {
   if (muted) return;
-  window.speechSynthesis.cancel();
-  const voices = window.speechSynthesis.getVoices().filter(v => v.lang.startsWith('en'));
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.rate  = parseFloat(rateSlider.value);
-  utter.pitch = parseFloat(pitchSlider.value);
-  if (voices[voiceSelect.value]) utter.voice = voices[voiceSelect.value];
-  window.speechSynthesis.speak(utter);
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  const voice = edgeVoices[voiceSelect.value]?.id || 'en-US-JennyNeural';
+  const rate  = parseFloat(rateSlider.value);
+  const pitch = parseFloat(pitchSlider.value);
+  const b64 = await window.electron.speakEdge(text, voice, rate, pitch);
+  if (!b64) return;
+  currentAudio = new Audio('data:audio/mp3;base64,' + b64);
+  currentAudio.play();
 }
 
 // --- Memory ---
