@@ -23,7 +23,7 @@ key.shadow.mapSize.set(512, 512); key.shadow.radius = 4;
 scene.add(key);
 const fill = new THREE.DirectionalLight(0xffd4a0, 0.5);
 fill.position.set(-4, 2, 3); scene.add(fill);
-const rim = new THREE.DirectionalLight(0xff3300, 0.6);
+const rim = new THREE.DirectionalLight(0xff6600, 1.0);
 rim.position.set(0, -5, -4); scene.add(rim);
 const back = new THREE.DirectionalLight(0x4488ff, 0.25);
 back.position.set(0, 3, -6); scene.add(back);
@@ -35,8 +35,8 @@ scene.add(moodLight);
 
 const S = 0.32, D = 0.9;
 
-const bodyMat  = new THREE.MeshStandardMaterial({ color: 0xC05828, roughness: 0.4, metalness: 0.15 });
-const darkMat  = new THREE.MeshStandardMaterial({ color: 0x7A3010, roughness: 0.5, metalness: 0.1 });
+const bodyMat  = new THREE.MeshStandardMaterial({ color: 0xFF6B1A, roughness: 0.35, metalness: 0.2 });
+const darkMat  = new THREE.MeshStandardMaterial({ color: 0xCC3D00, roughness: 0.45, metalness: 0.15 });
 const eyeMat   = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.1, metalness: 0.0, emissive: 0xdddddd, emissiveIntensity: 0.1 });
 const pupilMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.05, metalness: 0.3 });
 const screenMat= new THREE.MeshStandardMaterial({ color: 0x1a1a2e, roughness: 0.3, metalness: 0.4, emissive: 0x0a0a1a, emissiveIntensity: 0.5 });
