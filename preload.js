@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('electron', {
   getReminders: () => ipcRenderer.invoke('get-reminders'),
   addReminder: (text, time) => ipcRenderer.invoke('add-reminder', { text, time }),
   deleteReminder: (id) => ipcRenderer.invoke('delete-reminder', id),
+  quit: () => ipcRenderer.send('quit-app'),
+  moveWindow: (x, y) => ipcRenderer.send('move-window', { x, y }),
   getMemory: () => ipcRenderer.invoke('get-memory'),
   saveFact: (fact) => ipcRenderer.invoke('save-fact', fact),
   deleteFact: (index) => ipcRenderer.invoke('delete-fact', index),

@@ -1,3 +1,7 @@
+// Robot mood bridge — robot.js fires a custom event we listen to, and we dispatch moods back
+function setMood(m) { document.dispatchEvent(new CustomEvent('set-mood', { detail: m })); }
+function setClaudeState(s) { document.dispatchEvent(new CustomEvent('set-claude-state', { detail: s })); }
+
 const panel        = document.getElementById('chat-panel');
 const log          = document.getElementById('chat-log');
 const input        = document.getElementById('chat-input');
@@ -17,6 +21,7 @@ const rateVal      = document.getElementById('rate-val');
 const pitchVal     = document.getElementById('pitch-val');
 const memoryList   = document.getElementById('memory-list');
 const clearMemBtn  = document.getElementById('clear-memory-btn');
+const quitBtn      = document.getElementById('quit-btn');
 const memoryCount  = document.getElementById('memory-count');
 const memoryCountS = document.getElementById('memory-count-s');
 
@@ -100,6 +105,8 @@ async function refreshMemoryList() {
   });
 }
 
+quitBtn.addEventListener('click', () => window.electron.quit());
+
 clearMemBtn.addEventListener('click', async () => {
   await window.electron.clearMemory();
   refreshMemoryList();
@@ -182,14 +189,19 @@ async function sendMessage() {
     return;
   }
 
+  setMood('thinking');
   showBubble('Thinking...', 'state-thinking');
   try {
     const reply = await window.electron.sendChat(text);
     addLog('bot', reply);
     showBubble(reply.length > 150 ? reply.slice(0, 147) + '...' : reply, '');
+    setMood('happy');
     speak(reply);
+    setTimeout(() => setMood('idle'), 8000);
   } catch {
     addLog('bot', 'Something went wrong.');
+    setMood('concerned');
+    setTimeout(() => setMood('idle'), 5000);
   }
 }
 
@@ -223,6 +235,9 @@ closeBtn.addEventListener('click', () => {
 window.electron.onMonitorAlert(({ title, body, speak: shouldSpeak }) => {
   showBubble(`${title}: ${body}`, 'state-chat');
   if (shouldSpeak) speak(`${title}. ${body}`);
+  const m = title === 'Reminder' ? 'concerned' : title === 'Weather Alert' ? 'concerned' : 'excited';
+  setMood(m);
+  setTimeout(() => setMood('idle'), 10000);
 });
 
 // --- Claude activity status from OBS overlay ---
@@ -235,6 +250,7 @@ const STATUS_LABELS = {
 };
 
 window.electron.onClaudeStatus(({ type, message }) => {
+  setClaudeState(type);
   if (type === 'idle' || !type) return;
   const text = (type === 'thinking') ? 'Thinking...' : message;
   if (!text) return;

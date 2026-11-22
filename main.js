@@ -310,6 +310,7 @@ function createWindow() {
 
   win.loadFile('renderer/index.html');
   win.setIgnoreMouseEvents(false);
+  // win.webContents.openDevTools({ mode: 'detach' });
 
   win.webContents.once('did-finish-load', async () => {
     await loadMemory();
@@ -339,3 +340,6 @@ app.on('window-all-closed', () => app.quit());
 ipcMain.on('set-ignore-mouse', (_, ignore) => {
   win.setIgnoreMouseEvents(ignore, { forward: true });
 });
+
+ipcMain.on('quit-app', () => app.quit());
+ipcMain.on('move-window', (_, { x, y }) => win && win.setPosition(Math.round(x), Math.round(y)));

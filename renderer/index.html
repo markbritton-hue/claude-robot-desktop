@@ -79,12 +79,14 @@
     #mute-btn:hover { background: rgba(224,92,42,0.5); border-color: #e05c2a; }
     #mute-btn.muted { background: rgba(224,92,42,0.3); border-color: #e05c2a; }
 
-    /* Settings popup — appears near robot head */
+    /* Settings popup — anchored from top so it never clips */
     #settings-panel {
       position: absolute;
-      bottom: 195px;
+      top: 8px;
       right: 8px;
       width: 210px;
+      max-height: 480px;
+      overflow-y: auto;
       background: rgba(12,12,18,0.98);
       border: 1px solid rgba(224,92,42,0.6);
       border-radius: 12px;
@@ -183,6 +185,18 @@
       align-self: flex-start;
     }
     #clear-memory-btn:hover { background: rgba(224,92,42,0.3); }
+
+    #quit-btn {
+      background: rgba(180,30,30,0.2);
+      border: 1px solid rgba(220,60,60,0.5);
+      border-radius: 5px;
+      color: #ff6b6b;
+      font-size: 12px;
+      padding: 6px 12px;
+      cursor: pointer;
+      width: 100%;
+    }
+    #quit-btn:hover { background: rgba(220,60,60,0.4); border-color: #ff4444; }
 
     /* Speech bubble — just above the robot's head */
     #bubble {
@@ -351,6 +365,9 @@
       <label>Memory — <span id="memory-count">0</span> fact<span id="memory-count-s">s</span> stored</label>
       <div id="memory-list"></div>
       <button id="clear-memory-btn">Clear all</button>
+    </div>
+    <div class="setting-row">
+      <button id="quit-btn">⏻ Quit Robot</button>
     </div>
   </div>
 
