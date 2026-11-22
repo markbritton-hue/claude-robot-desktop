@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('electron', {
   quit: () => ipcRenderer.send('quit-app'),
   moveWindow: (x, y) => ipcRenderer.send('move-window', { x, y }),
   getMemory: () => ipcRenderer.invoke('get-memory'),
+  getHistory: () => ipcRenderer.invoke('get-history'),
   saveFact: (fact) => ipcRenderer.invoke('save-fact', fact),
   deleteFact: (index) => ipcRenderer.invoke('delete-fact', index),
   clearMemory: () => ipcRenderer.invoke('clear-memory'),

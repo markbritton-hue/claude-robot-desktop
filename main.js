@@ -120,6 +120,7 @@ function memorySystemPrompt() {
 }
 
 ipcMain.handle('get-memory', () => memory.facts);
+ipcMain.handle('get-history', () => history);
 
 ipcMain.handle('save-fact', async (_, fact) => {
   const trimmed = fact.trim();

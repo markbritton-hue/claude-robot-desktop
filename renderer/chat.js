@@ -25,6 +25,20 @@ const quitBtn      = document.getElementById('quit-btn');
 const memoryCount  = document.getElementById('memory-count');
 const memoryCountS = document.getElementById('memory-count-s');
 
+// Load and display recent conversation history on startup
+async function loadChatHistory() {
+  const history = await window.electron.getHistory();
+  if (!history || !history.length) return;
+  const recent = history.slice(-10);
+  recent.forEach(msg => addLog(msg.role === 'user' ? 'you' : 'bot', msg.content));
+  const divider = document.createElement('div');
+  divider.className = 'history-divider';
+  divider.textContent = '— previous session —';
+  log.insertBefore(divider, log.firstChild);
+}
+
+loadChatHistory();
+
 // Settings panel toggle
 wrenchBtn.addEventListener('click', e => {
   e.stopPropagation();
