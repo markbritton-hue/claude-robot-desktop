@@ -270,20 +270,15 @@ ipcMain.handle('speak-edge', async (_, { text, voiceId, rate, pitch }) => {
   try {
     const tts = new MsEdgeTTS();
     const voice = voiceId || 'en-US-JennyNeural';
-    const rateStr = rate !== undefined ? `${rate > 0 ? '+' : ''}${Math.round((rate - 1) * 100)}%` : '+0%';
-    const pitchStr = pitch !== undefined ? `${pitch > 0 ? '+' : ''}${Math.round((pitch - 1) * 50)}Hz` : '+0Hz';
-    await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3, `<prosody rate="${rateStr}" pitch="${pitchStr}">${text}</prosody>`);
-    const tmpFile = path.join(os.tmpdir(), `claude-speak-${Date.now()}.mp3`);
+    await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+    const { audioStream } = await tts.toStream(text);
+    const chunks = [];
     await new Promise((resolve, reject) => {
-      const readable = tts.toStream();
-      const chunks = [];
-      readable.on('data', d => chunks.push(d));
-      readable.on('end', () => { fs.writeFileSync(tmpFile, Buffer.concat(chunks)); resolve(); });
-      readable.on('error', reject);
+      audioStream.on('data', d => chunks.push(d));
+      audioStream.on('end', resolve);
+      audioStream.on('error', reject);
     });
-    const buf = fs.readFileSync(tmpFile);
-    fs.unlinkSync(tmpFile);
-    return buf.toString('base64');
+    return Buffer.concat(chunks).toString('base64');
   } catch (e) {
     console.error('[edge-tts]', e.message);
     return null;
