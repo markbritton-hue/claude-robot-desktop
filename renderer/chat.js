@@ -249,11 +249,12 @@ const STATUS_LABELS = {
   idle:     null,
 };
 
-window.electron.onClaudeStatus(({ type, message }) => {
+window.electron.onClaudeStatus(({ type, message, project }) => {
   setClaudeState(type);
   if (type === 'idle' || !type) return;
-  const text = (type === 'thinking') ? 'Thinking...' : message;
-  if (!text) return;
+  const baseText = (type === 'thinking') ? 'Thinking...' : message;
+  if (!baseText) return;
+  const text = project ? `[${project}] ${baseText}` : baseText;
   const cls = type === 'thinking' ? 'state-thinking' : type === 'question' ? 'state-chat' : '';
   showBubble(text, cls);
 });
