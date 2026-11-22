@@ -32,19 +32,68 @@ function notify(title, body, speak = true) {
   if (win) win.webContents.send('monitor-alert', { title, body, speak });
 }
 
-// --- OBS overlay status watcher ---
-const STATUS_FILE = path.join('c:\\Web App Projects\\clauderobot\\obs-overlay', 'status.json');
+// --- Claude transcript watcher (replaces OBS overlay dependency) ---
+const CLAUDE_PROJECTS = path.join(os.homedir(), '.claude', 'projects');
+const debounceTimers = {};
 
-function readStatus() {
-  try { return JSON.parse(fs.readFileSync(STATUS_FILE, 'utf8')); }
-  catch { return null; }
+function projectNameFromPath(filePath) {
+  const parts = filePath.split(path.sep);
+  const idx = parts.lastIndexOf('projects');
+  if (idx < 0) return null;
+  const folder = parts[idx + 1] || '';
+  const segments = folder.split('--');
+  return segments[segments.length - 1] || null;
+}
+
+function getLatestAssistantBlock(filePath) {
+  try {
+    const lines = fs.readFileSync(filePath, 'utf8').trim().split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const obj = JSON.parse(lines[i]);
+        if (!obj.message || obj.message.role !== 'assistant') continue;
+        const blocks = obj.message.content;
+        if (!Array.isArray(blocks)) continue;
+        for (const block of blocks) {
+          if (block.type === 'thinking') return { type: 'thinking' };
+          if (block.type === 'tool_use') return { type: 'tool_use', name: block.name };
+          if (block.type === 'text' && block.text && block.text.trim())
+            return { type: 'text', text: block.text.trim() };
+        }
+      } catch {}
+    }
+  } catch {}
+  return null;
+}
+
+function onTranscriptChange(filePath) {
+  if (debounceTimers[filePath]) clearTimeout(debounceTimers[filePath]);
+  debounceTimers[filePath] = setTimeout(() => {
+    const block = getLatestAssistantBlock(filePath);
+    if (!block || !win) return;
+    const project = projectNameFromPath(filePath);
+
+    if (block.type === 'thinking') {
+      win.webContents.send('claude-status', { type: 'thinking', message: 'Thinking...', project });
+    } else if (block.type === 'tool_use') {
+      win.webContents.send('claude-status', { type: 'working', message: `Using ${block.name}...`, project });
+    } else if (block.type === 'text') {
+      if (/\?\s*$/.test(block.text)) {
+        const trimmed = block.text.length > 350 ? block.text.slice(0, 347) + '...' : block.text;
+        win.webContents.send('claude-status', { type: 'question', message: trimmed, project });
+      } else {
+        win.webContents.send('claude-status', { type: 'idle', message: '', project: null });
+      }
+    }
+  }, 300);
 }
 
 function watchStatus() {
-  if (!fs.existsSync(STATUS_FILE)) return;
-  fs.watch(STATUS_FILE, () => {
-    const s = readStatus();
-    if (s && win) win.webContents.send('claude-status', s);
+  if (!fs.existsSync(CLAUDE_PROJECTS)) return;
+  fs.watch(CLAUDE_PROJECTS, { recursive: true }, (_, filename) => {
+    if (!filename || !filename.endsWith('.jsonl')) return;
+    const filePath = path.join(CLAUDE_PROJECTS, filename);
+    onTranscriptChange(filePath);
   });
 }
 
