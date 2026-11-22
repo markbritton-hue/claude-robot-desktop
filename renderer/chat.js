@@ -84,8 +84,8 @@ wrenchBtn.addEventListener('click', async e => {
 });
 closeSettings.addEventListener('click', () => settingsPanel.classList.remove('open'));
 
-rateSlider.addEventListener('input', () => rateVal.textContent = parseFloat(rateSlider.value).toFixed(1));
-pitchSlider.addEventListener('input', () => pitchVal.textContent = parseFloat(pitchSlider.value).toFixed(1));
+rateSlider.addEventListener('input', () => { rateVal.textContent = parseFloat(rateSlider.value).toFixed(1); saveSettings(); });
+pitchSlider.addEventListener('input', () => { pitchVal.textContent = parseFloat(pitchSlider.value).toFixed(1); saveSettings(); });
 
 let bubbleTimer = null;
 let chatAutoCloseTimer = null;
@@ -103,6 +103,19 @@ muteBtn.addEventListener('click', e => {
 let edgeVoices = [];
 let currentAudio = null;
 
+function saveSettings() {
+  localStorage.setItem('voiceIdx', voiceSelect.value);
+  localStorage.setItem('rate', rateSlider.value);
+  localStorage.setItem('pitch', pitchSlider.value);
+}
+
+function loadSettings() {
+  const rate  = localStorage.getItem('rate');
+  const pitch = localStorage.getItem('pitch');
+  if (rate)  { rateSlider.value  = rate;  rateVal.textContent  = parseFloat(rate).toFixed(1); }
+  if (pitch) { pitchSlider.value = pitch; pitchVal.textContent = parseFloat(pitch).toFixed(1); }
+}
+
 async function populateVoices() {
   edgeVoices = await window.electron.getEdgeVoices();
   voiceSelect.innerHTML = '';
@@ -112,9 +125,16 @@ async function populateVoices() {
     opt.textContent = v.name;
     voiceSelect.appendChild(opt);
   });
+  const savedIdx = localStorage.getItem('voiceIdx');
+  if (savedIdx !== null) voiceSelect.value = savedIdx;
 }
 
+loadSettings();
 populateVoices();
+
+voiceSelect.addEventListener('change', saveSettings);
+rateSlider.addEventListener('change', saveSettings);
+pitchSlider.addEventListener('change', saveSettings);
 
 async function speak(text) {
   if (muted) return;
