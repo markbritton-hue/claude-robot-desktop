@@ -25,25 +25,62 @@ const quitBtn      = document.getElementById('quit-btn');
 const memoryCount  = document.getElementById('memory-count');
 const memoryCountS = document.getElementById('memory-count-s');
 
-// Load and display recent conversation history on startup
-async function loadChatHistory() {
-  const history = await window.electron.getHistory();
-  if (!history || !history.length) return;
-  const recent = history.slice(-10);
-  recent.forEach(msg => addLog(msg.role === 'user' ? 'you' : 'bot', msg.content));
-  const divider = document.createElement('div');
-  divider.className = 'history-divider';
-  divider.textContent = '— previous session —';
-  log.insertBefore(divider, log.firstChild);
+const reminderList  = document.getElementById('reminder-list');
+const reminderCount = document.getElementById('reminder-count');
+
+function refreshReminderList(reminders) {
+  reminderCount.textContent = reminders.length;
+  reminderList.innerHTML = '';
+  if (!reminders.length) {
+    reminderList.innerHTML = '<div class="memory-empty">No reminders set.</div>';
+    return;
+  }
+  reminders.forEach(r => {
+    const row = document.createElement('div');
+    row.className = 'reminder-item';
+    const txt = document.createElement('span');
+    txt.className = 'reminder-text';
+    txt.textContent = r.text;
+    const time = document.createElement('span');
+    time.className = 'reminder-time';
+    time.textContent = new Date(r.time).toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    const del = document.createElement('button');
+    del.className = 'reminder-del';
+    del.textContent = '✕';
+    del.addEventListener('click', async () => {
+      await window.electron.deleteReminder(r.id);
+      const updated = await window.electron.getReminders();
+      refreshReminderList(updated);
+    });
+    row.appendChild(txt);
+    row.appendChild(time);
+    row.appendChild(del);
+    reminderList.appendChild(row);
+  });
 }
 
-loadChatHistory();
+// Receive history + reminders pushed from main after Firestore load
+window.electron.onInitData(({ history, reminders }) => {
+  if (history && history.length) {
+    const recent = history.slice(-10);
+    recent.forEach(msg => addLog(msg.role === 'user' ? 'you' : 'bot', msg.content));
+    const divider = document.createElement('div');
+    divider.className = 'history-divider';
+    divider.textContent = '— previous session —';
+    log.insertBefore(divider, log.firstChild);
+  }
+  if (reminders) refreshReminderList(reminders);
+});
 
 // Settings panel toggle
-wrenchBtn.addEventListener('click', e => {
+wrenchBtn.addEventListener('click', async e => {
   e.stopPropagation();
   settingsPanel.classList.toggle('open');
-  if (settingsPanel.classList.contains('open')) refreshMemoryList();
+  if (settingsPanel.classList.contains('open')) {
+    refreshMemoryList();
+    const reminders = await window.electron.getReminders();
+    refreshReminderList(reminders);
+  }
 });
 closeSettings.addEventListener('click', () => settingsPanel.classList.remove('open'));
 

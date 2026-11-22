@@ -398,6 +398,8 @@ function createWindow() {
     await loadMemory();
     await loadReminders();
     await loadHistory();
+    // Push history and reminders to renderer now that they're loaded
+    win.webContents.send('init-data', { history, reminders });
     watchStatus();
     fetchWeather();
     setInterval(checkReminders, 30000);
