@@ -276,6 +276,83 @@ function checkHourlyAnnouncement() {
 
 setInterval(checkHourlyAnnouncement, 30000); // check every 30 seconds
 
+// --- Proactive check-ins ---
+let workSessionStart = null;      // when coding session began
+let lastBreakNudge = 0;           // timestamp of last break reminder
+let lastCheckIn = Date.now();     // timestamp of last general check-in
+
+const BREAK_NUDGES = [
+  "Hey, you've been at it for a while — take a quick stretch!",
+  "Don't forget to blink! You've been coding for over an hour.",
+  "Quick break? Your eyes will thank you.",
+  "You've been working hard — maybe grab some water?",
+];
+
+const CHECK_IN_MSGS = [
+  "How's it going? Need anything?",
+  "Still hanging in there? Let me know if you need help!",
+  "Just checking in — everything okay?",
+  "Hey! How's the work going today?",
+  "Taking a breather? I'm here if you need me.",
+];
+
+// Track Claude Code working state for session timing
+let _lastClaudeType = null;
+
+const _origClaudeStatus = window.electron.onClaudeStatus;
+
+window.electron.onClaudeStatus(({ type, message }) => {
+  if (type !== _lastClaudeType) {
+    if (type === 'working' || type === 'thinking') {
+      if (!workSessionStart) workSessionStart = Date.now();
+    } else if (type === 'idle' || !type) {
+      workSessionStart = null;
+    }
+    _lastClaudeType = type;
+  }
+});
+
+function checkProactive() {
+  const now = Date.now();
+
+  // Break nudge: coding > 60 min without a break reminder
+  if (workSessionStart && (now - workSessionStart) > 60 * 60 * 1000) {
+    if (now - lastBreakNudge > 60 * 60 * 1000) {
+      lastBreakNudge = now;
+      const msg = BREAK_NUDGES[Math.floor(Math.random() * BREAK_NUDGES.length)];
+      showBubble(msg, 'state-chat');
+      speak(msg);
+      setMood('concerned');
+      setTimeout(() => setMood('idle'), 10000);
+      return;
+    }
+  }
+
+  // General check-in every 45–75 minutes of idle time
+  const checkInInterval = (45 + Math.floor(Math.random() * 30)) * 60 * 1000;
+  if (!workSessionStart && (now - lastCheckIn) > checkInInterval) {
+    lastCheckIn = now;
+    const h = new Date().getHours();
+    if (h >= 8 && h < 22) { // only during waking hours
+      const msg = CHECK_IN_MSGS[Math.floor(Math.random() * CHECK_IN_MSGS.length)];
+      showBubble(msg, 'state-chat');
+      speak(msg);
+      setMood('happy');
+      setTimeout(() => setMood('idle'), 10000);
+    }
+  }
+}
+
+setInterval(checkProactive, 60000); // check every minute
+
+// Startup greeting after 3 seconds
+setTimeout(() => {
+  const h = new Date().getHours();
+  const greeting = h < 12 ? 'Good morning!' : h < 17 ? 'Good afternoon!' : 'Good evening!';
+  showBubble(`${greeting} I'm here if you need me.`, 'state-chat');
+  speak(`${greeting} I'm here if you need me.`);
+}, 3000);
+
 // --- Mic ---
 let listening = false;
 
