@@ -217,7 +217,10 @@ function animate() {
   // Bob — faster when excited
   const bobSpeed = mood === 'excited' ? 2.8 : mood === 'happy' ? 2.0 : 1.4;
   const bobAmp   = mood === 'excited' ? 0.18 : 0.08;
-  robot.position.y = Math.sin(t * bobSpeed) * bobAmp;
+  const bobY = Math.sin(t * bobSpeed) * bobAmp;
+  robot.position.y = bobY;
+  // Notify bag to follow — convert Three.js units to pixels (approx 40px per unit at this camera)
+  document.dispatchEvent(new CustomEvent('robot-bob', { detail: Math.round(bobY * -40) }));
 
   // Antenna pulse — frantic when working
   const antennaSpeed = mood === 'working' ? 6 : mood === 'thinking' ? 4 : 2.5;

@@ -51,6 +51,17 @@ function updateTokenBag({ used, budget }) {
 window.electron.getTokens().then(updateTokenBag);
 window.electron.onTokenUpdate(updateTokenBag);
 
+const tokenBagEl = document.getElementById('token-bag');
+document.addEventListener('robot-bob', e => {
+  tokenBagEl.style.transform = `scale(1) translateY(${e.detail}px)`;
+});
+tokenBagEl.addEventListener('mouseenter', () => {
+  tokenBagEl.style.transform = `scale(2) translateY(0px)`;
+});
+tokenBagEl.addEventListener('mouseleave', () => {
+  tokenBagEl.style.transform = '';
+});
+
 budgetSlider.addEventListener('input', () => {
   budgetVal.textContent = parseInt(budgetSlider.value).toLocaleString();
 });
