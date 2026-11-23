@@ -255,6 +255,30 @@ async function saveMessage(msg) {
   } catch {}
 }
 
+// --- Token tracking ---
+const TOKEN_BUDGET = 50000; // daily budget
+let tokenUsage = { date: '', used: 0 };
+
+async function loadTokenUsage() {
+  try {
+    const snap = await getDoc(doc(db, USER_DOC));
+    if (snap.exists() && snap.data().tokenUsage) tokenUsage = snap.data().tokenUsage;
+  } catch {}
+  // Reset if it's a new day
+  const today = new Date().toDateString();
+  if (tokenUsage.date !== today) tokenUsage = { date: today, used: 0 };
+}
+
+async function addTokens(n) {
+  const today = new Date().toDateString();
+  if (tokenUsage.date !== today) tokenUsage = { date: today, used: 0 };
+  tokenUsage.used += n;
+  try { await setDoc(doc(db, USER_DOC), { tokenUsage }, { merge: true }); } catch {}
+  if (win) win.webContents.send('token-update', { used: tokenUsage.used, budget: TOKEN_BUDGET });
+}
+
+ipcMain.handle('get-tokens', () => ({ used: tokenUsage.used, budget: TOKEN_BUDGET }));
+
 // --- Chat ---
 ipcMain.handle('chat-message', async (_, userMsg) => {
   history.push({ role: 'user', content: userMsg });
@@ -267,6 +291,8 @@ ipcMain.handle('chat-message', async (_, userMsg) => {
     messages: history,
   });
   const reply = res.content[0].text;
+  const tokensUsed = (res.usage?.input_tokens || 0) + (res.usage?.output_tokens || 0);
+  await addTokens(tokensUsed);
   history.push({ role: 'assistant', content: reply });
   await saveMessage({ role: 'assistant', content: reply });
   if (history.length > 40) history.splice(0, 2);
@@ -417,6 +443,7 @@ function createWindow() {
     await loadMemory();
     await loadReminders();
     await loadHistory();
+    await loadTokenUsage();
     // Push history and reminders to renderer now that they're loaded
     win.webContents.send('init-data', { history, reminders });
     watchStatus();

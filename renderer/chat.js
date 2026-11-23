@@ -27,6 +27,18 @@ const memoryCountS = document.getElementById('memory-count-s');
 
 const reminderList  = document.getElementById('reminder-list');
 const reminderCount = document.getElementById('reminder-count');
+const tokenBar      = document.getElementById('token-bar');
+const tokenPct      = document.getElementById('token-pct');
+
+function updateTokenBag({ used, budget }) {
+  const pct = Math.max(0, Math.min(100, Math.round((1 - used / budget) * 100)));
+  tokenBar.style.width = pct + '%';
+  tokenPct.textContent = pct + '%';
+  tokenBar.style.background = pct > 50 ? '#4ade80' : pct > 20 ? '#facc15' : '#f87171';
+}
+
+window.electron.getTokens().then(updateTokenBag);
+window.electron.onTokenUpdate(updateTokenBag);
 
 function refreshReminderList(reminders) {
   reminderCount.textContent = reminders.length;

@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('electron', {
   speakEdge: (text, voiceId, rate, pitch) => ipcRenderer.invoke('speak-edge', { text, voiceId, rate, pitch }),
   onInitData: (cb) => ipcRenderer.on('init-data', (_, data) => cb(data)),
   getWeather: () => ipcRenderer.invoke('get-weather'),
+  getTokens: () => ipcRenderer.invoke('get-tokens'),
+  onTokenUpdate: (cb) => ipcRenderer.on('token-update', (_, t) => cb(t)),
   saveFact: (fact) => ipcRenderer.invoke('save-fact', fact),
   deleteFact: (index) => ipcRenderer.invoke('delete-fact', index),
   clearMemory: () => ipcRenderer.invoke('clear-memory'),

@@ -181,6 +181,36 @@
     .reminder-del { background: none; border: none; color: rgba(255,255,255,0.3); font-size: 12px; cursor: pointer; padding: 0 2px; line-height: 1; }
     .reminder-del:hover { color: #e05c2a; }
     .history-divider { text-align: center; font-size: 10px; color: rgba(255,255,255,0.25); margin: 4px 0 8px; }
+
+    #token-bag {
+      position: absolute;
+      bottom: 54px;
+      left: 10px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      z-index: 30;
+      background: rgba(12,12,18,0.8);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 20px;
+      padding: 3px 8px 3px 5px;
+      pointer-events: none;
+    }
+    #token-bag-icon { font-size: 14px; line-height: 1; }
+    #token-bar-wrap {
+      width: 48px; height: 5px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    #token-bar {
+      height: 100%;
+      width: 100%;
+      background: #4ade80;
+      border-radius: 3px;
+      transition: width 0.5s ease, background 0.5s ease;
+    }
+    #token-pct { font-size: 10px; color: rgba(255,255,255,0.5); min-width: 28px; }
     #clear-memory-btn {
       background: rgba(224,92,42,0.15);
       border: 1px solid rgba(224,92,42,0.4);
@@ -334,6 +364,13 @@
   <div id="three-canvas"></div>
   <!-- Transparent overlay to catch robot clicks -->
   <div id="robot-click-area"></div>
+
+  <!-- Token bag -->
+  <div id="token-bag" title="Daily token budget">
+    <div id="token-bag-icon">👜</div>
+    <div id="token-bar-wrap"><div id="token-bar"></div></div>
+    <div id="token-pct">100%</div>
+  </div>
 
   <div id="bubble"></div>
 
