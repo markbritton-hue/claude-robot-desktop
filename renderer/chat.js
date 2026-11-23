@@ -31,12 +31,14 @@ const budgetSlider  = document.getElementById('budget-slider');
 const budgetVal     = document.getElementById('budget-val');
 const tokensUsedEl  = document.getElementById('tokens-used');
 
+const tokenPct = document.getElementById('token-pct');
 let currentBobY = 0;
 let bagHovered = false;
 
 function updateTokenBag({ used, budget }) {
   const pct = Math.max(0, Math.min(100, Math.round((1 - used / budget) * 100)));
   // Coin stack: translateY 48=empty (all coins below view), 0=full (all coins visible)
+  if (tokenPct) tokenPct.textContent = pct + '% remaining';
   const coinFill = document.getElementById('coin-fill');
   if (coinFill) {
     const translateY = Math.round(48 * (1 - pct / 100));
@@ -47,8 +49,7 @@ function updateTokenBag({ used, budget }) {
   tokensUsedEl.textContent = used.toLocaleString();
 }
 
-// TEST: force 50% to preview — remove after checking
-window.electron.getTokens().then(t => updateTokenBag({ used: t.budget * 0.5, budget: t.budget }));
+window.electron.getTokens().then(updateTokenBag);
 window.electron.onTokenUpdate(updateTokenBag);
 
 const tokenBagEl = document.getElementById('token-bag');
