@@ -49,27 +49,39 @@ function projectNameFromPath(filePath) {
 function getLatestAssistantBlock(filePath) {
   try {
     const lines = fs.readFileSync(filePath, 'utf8').trim().split('\n');
+    let sessionTokens = 0;
+    let result = null;
     for (let i = lines.length - 1; i >= 0; i--) {
       try {
         const obj = JSON.parse(lines[i]);
         if (!obj.message || obj.message.role !== 'assistant') continue;
-        // Extract context window usage from this Claude Code session
         const u = obj.message.usage;
-        if (u && win) {
-          const totalCtx = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
-          const ctxPct = Math.min(100, Math.round((totalCtx / 200000) * 100));
-          win.webContents.send('context-update', ctxPct);
+        if (u) {
+          // Context % from the latest turn (input includes full context)
+          if (!result && win) {
+            const totalCtx = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+            const ctxPct = Math.min(100, Math.round((totalCtx / 200000) * 100));
+            win.webContents.send('context-update', ctxPct);
+          }
+          // Accumulate output tokens across all turns for total session usage
+          sessionTokens += (u.output_tokens || 0) + (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0);
         }
-        const blocks = obj.message.content;
-        if (!Array.isArray(blocks)) continue;
-        for (const block of blocks) {
-          if (block.type === 'thinking') return { type: 'thinking' };
-          if (block.type === 'tool_use') return { type: 'tool_use', name: block.name };
-          if (block.type === 'text' && block.text && block.text.trim())
-            return { type: 'text', text: block.text.trim() };
+        if (!result) {
+          const blocks = obj.message.content;
+          if (Array.isArray(blocks)) {
+            for (const block of blocks) {
+              if (block.type === 'thinking') { result = { type: 'thinking' }; break; }
+              if (block.type === 'tool_use') { result = { type: 'tool_use', name: block.name }; break; }
+              if (block.type === 'text' && block.text?.trim()) { result = { type: 'text', text: block.text.trim() }; break; }
+            }
+          }
         }
       } catch {}
     }
+    if (win && sessionTokens > 0) {
+      win.webContents.send('token-update', { used: sessionTokens, budget: tokenBudget });
+    }
+    return result;
   } catch {}
   return null;
 }
@@ -263,7 +275,7 @@ async function saveMessage(msg) {
 }
 
 // --- Token tracking ---
-let tokenBudget = 50000;
+let tokenBudget = 500000;
 let tokenUsage = { date: '', used: 0 };
 
 async function loadTokenUsage() {
