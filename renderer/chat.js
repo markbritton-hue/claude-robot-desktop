@@ -38,10 +38,9 @@ function updateTokenBag({ used, budget }) {
   // Coin fill: translateY ranges from 36 (empty) to 0 (full) over the 36px fill height
   const coinFill = document.getElementById('coin-fill');
   if (coinFill) {
-    const translateY = Math.round(36 * (1 - pct / 100));
+    const translateY = Math.round(40 * (1 - pct / 100));
     coinFill.setAttribute('transform', `translate(0,${translateY})`);
-    // Color shifts gold → yellow → red as it depletes
-    const fillColor = pct > 50 ? 'url(#coin-grad)' : pct > 20 ? '#d4a000' : '#c0392b';
+    const fillColor = pct > 50 ? 'url(#coin-grad)' : pct > 20 ? '#c8900a' : '#8B1a00';
     coinFill.setAttribute('fill', fillColor);
   }
   budgetSlider.value = budget;
