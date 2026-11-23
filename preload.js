@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('electron', {
   onInitData: (cb) => ipcRenderer.on('init-data', (_, data) => cb(data)),
   getWeather: () => ipcRenderer.invoke('get-weather'),
   getTokens: () => ipcRenderer.invoke('get-tokens'),
+  setTokenBudget: (n) => ipcRenderer.invoke('set-token-budget', n),
   onTokenUpdate: (cb) => ipcRenderer.on('token-update', (_, t) => cb(t)),
   saveFact: (fact) => ipcRenderer.invoke('save-fact', fact),
   deleteFact: (index) => ipcRenderer.invoke('delete-fact', index),

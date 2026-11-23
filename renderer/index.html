@@ -407,6 +407,11 @@
       <input type="range" id="pitch-slider" min="0.5" max="2.0" step="0.1" value="1.0">
     </div>
     <div class="setting-row">
+      <label>Daily Token Budget — <span id="budget-val">50000</span></label>
+      <input type="range" id="budget-slider" min="10000" max="200000" step="5000" value="50000">
+      <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:2px;">Used today: <span id="tokens-used">0</span></div>
+    </div>
+    <div class="setting-row">
       <label>Reminders — <span id="reminder-count">0</span> pending</label>
       <div id="reminder-list"></div>
     </div>

@@ -256,15 +256,17 @@ async function saveMessage(msg) {
 }
 
 // --- Token tracking ---
-const TOKEN_BUDGET = 50000; // daily budget
+let tokenBudget = 50000;
 let tokenUsage = { date: '', used: 0 };
 
 async function loadTokenUsage() {
   try {
     const snap = await getDoc(doc(db, USER_DOC));
-    if (snap.exists() && snap.data().tokenUsage) tokenUsage = snap.data().tokenUsage;
+    if (snap.exists()) {
+      if (snap.data().tokenUsage) tokenUsage = snap.data().tokenUsage;
+      if (snap.data().tokenBudget) tokenBudget = snap.data().tokenBudget;
+    }
   } catch {}
-  // Reset if it's a new day
   const today = new Date().toDateString();
   if (tokenUsage.date !== today) tokenUsage = { date: today, used: 0 };
 }
@@ -274,10 +276,16 @@ async function addTokens(n) {
   if (tokenUsage.date !== today) tokenUsage = { date: today, used: 0 };
   tokenUsage.used += n;
   try { await setDoc(doc(db, USER_DOC), { tokenUsage }, { merge: true }); } catch {}
-  if (win) win.webContents.send('token-update', { used: tokenUsage.used, budget: TOKEN_BUDGET });
+  if (win) win.webContents.send('token-update', { used: tokenUsage.used, budget: tokenBudget });
 }
 
-ipcMain.handle('get-tokens', () => ({ used: tokenUsage.used, budget: TOKEN_BUDGET }));
+ipcMain.handle('get-tokens', () => ({ used: tokenUsage.used, budget: tokenBudget }));
+
+ipcMain.handle('set-token-budget', async (_, budget) => {
+  tokenBudget = budget;
+  try { await setDoc(doc(db, USER_DOC), { tokenBudget }, { merge: true }); } catch {}
+  if (win) win.webContents.send('token-update', { used: tokenUsage.used, budget: tokenBudget });
+});
 
 // --- Chat ---
 ipcMain.handle('chat-message', async (_, userMsg) => {

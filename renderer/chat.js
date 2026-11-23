@@ -29,16 +29,29 @@ const reminderList  = document.getElementById('reminder-list');
 const reminderCount = document.getElementById('reminder-count');
 const tokenBar      = document.getElementById('token-bar');
 const tokenPct      = document.getElementById('token-pct');
+const budgetSlider  = document.getElementById('budget-slider');
+const budgetVal     = document.getElementById('budget-val');
+const tokensUsedEl  = document.getElementById('tokens-used');
 
 function updateTokenBag({ used, budget }) {
   const pct = Math.max(0, Math.min(100, Math.round((1 - used / budget) * 100)));
   tokenBar.style.width = pct + '%';
   tokenPct.textContent = pct + '%';
   tokenBar.style.background = pct > 50 ? '#4ade80' : pct > 20 ? '#facc15' : '#f87171';
+  budgetSlider.value = budget;
+  budgetVal.textContent = budget.toLocaleString();
+  tokensUsedEl.textContent = used.toLocaleString();
 }
 
 window.electron.getTokens().then(updateTokenBag);
 window.electron.onTokenUpdate(updateTokenBag);
+
+budgetSlider.addEventListener('input', () => {
+  budgetVal.textContent = parseInt(budgetSlider.value).toLocaleString();
+});
+budgetSlider.addEventListener('change', () => {
+  window.electron.setTokenBudget(parseInt(budgetSlider.value));
+});
 
 function refreshReminderList(reminders) {
   reminderCount.textContent = reminders.length;
