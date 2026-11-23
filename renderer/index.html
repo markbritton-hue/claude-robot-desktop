@@ -201,10 +201,14 @@
     #token-pct {
       font-size: 11px; font-weight: 600;
       color: #FFD700; font-family: 'Segoe UI', sans-serif;
-      text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+      text-shadow: 0 1px 4px rgba(0,0,0,0.9);
       opacity: 0; transition: opacity 0.15s ease;
-      position: absolute; bottom: -16px; left: 50%; transform: translateX(-50%);
+      position: absolute; bottom: 100%; left: 0;
+      margin-bottom: 4px;
       white-space: nowrap;
+      background: rgba(0,0,0,0.6);
+      border-radius: 6px;
+      padding: 3px 7px;
     }
     #token-bag:hover #token-pct { opacity: 1; }
     #clear-memory-btn {
@@ -362,7 +366,7 @@
   <div id="robot-click-area"></div>
 
   <!-- Token bag -->
-  <div id="token-bag" title="Daily token budget">
+  <div id="token-bag">
     <div id="token-pct">100%</div>
     <svg id="token-bag-svg" viewBox="0 0 60 72" width="70" height="84" xmlns="http://www.w3.org/2000/svg">
       <defs>

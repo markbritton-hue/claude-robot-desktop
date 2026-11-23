@@ -58,7 +58,7 @@ function updateContextArc(pct) {
   const remaining = 100 - pct;
   const coinFill = document.getElementById('coin-fill');
   if (coinFill) coinFill.setAttribute('transform', `translate(0,${Math.round(48 * (1 - remaining / 100))})`);
-  if (tokenPct) tokenPct.textContent = `Session ${remaining}% left  ·  Context ${pct}% used`;
+  if (tokenPct) tokenPct.textContent = `${remaining}% session · ${pct}% context`;
 }
 window.electron.onContextUpdate(updateContextArc);
 let bagHovered = false;
