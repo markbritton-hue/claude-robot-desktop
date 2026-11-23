@@ -27,7 +27,6 @@ const memoryCountS = document.getElementById('memory-count-s');
 
 const reminderList  = document.getElementById('reminder-list');
 const reminderCount = document.getElementById('reminder-count');
-const tokenPct      = document.getElementById('token-pct');
 const budgetSlider  = document.getElementById('budget-slider');
 const budgetVal     = document.getElementById('budget-val');
 const tokensUsedEl  = document.getElementById('tokens-used');
@@ -37,7 +36,6 @@ let bagHovered = false;
 
 function updateTokenBag({ used, budget }) {
   const pct = Math.max(0, Math.min(100, Math.round((1 - used / budget) * 100)));
-  tokenPct.textContent = pct + '%';
   // Coin stack: translateY 48=empty (all coins below view), 0=full (all coins visible)
   const coinFill = document.getElementById('coin-fill');
   if (coinFill) {
@@ -49,7 +47,8 @@ function updateTokenBag({ used, budget }) {
   tokensUsedEl.textContent = used.toLocaleString();
 }
 
-window.electron.getTokens().then(updateTokenBag);
+// TEST: force 50% to preview — remove after checking
+window.electron.getTokens().then(t => updateTokenBag({ used: t.budget * 0.5, budget: t.budget }));
 window.electron.onTokenUpdate(updateTokenBag);
 
 const tokenBagEl = document.getElementById('token-bag');
