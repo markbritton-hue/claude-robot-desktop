@@ -300,7 +300,9 @@ ipcMain.handle('chat-message', async (_, userMsg) => {
   });
   const reply = res.content[0].text;
   const tokensUsed = (res.usage?.input_tokens || 0) + (res.usage?.output_tokens || 0);
+  const contextPct = Math.min(100, Math.round(((res.usage?.input_tokens || 0) / 200000) * 100));
   await addTokens(tokensUsed);
+  if (win) win.webContents.send('context-update', contextPct);
   history.push({ role: 'assistant', content: reply });
   await saveMessage({ role: 'assistant', content: reply });
   if (history.length > 40) history.splice(0, 2);

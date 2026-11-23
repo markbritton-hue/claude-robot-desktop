@@ -31,8 +31,28 @@ const budgetSlider  = document.getElementById('budget-slider');
 const budgetVal     = document.getElementById('budget-val');
 const tokensUsedEl  = document.getElementById('tokens-used');
 
-const tokenPct = document.getElementById('token-pct');
+const tokenPct  = document.getElementById('token-pct');
+const ctxArc    = document.getElementById('context-arc');
+let ctxArcLen   = 0;
 let currentBobY = 0;
+
+// Measure the bag outline once the SVG is in the DOM
+requestAnimationFrame(() => {
+  if (ctxArc) {
+    ctxArcLen = ctxArc.getTotalLength();
+    ctxArc.setAttribute('stroke-dasharray', `0 ${ctxArcLen}`);
+  }
+});
+
+function updateContextArc(pct) {
+  if (!ctxArc || !ctxArcLen) return;
+  const filled = (pct / 100) * ctxArcLen;
+  ctxArc.setAttribute('stroke-dasharray', `${filled} ${ctxArcLen - filled}`);
+  // Shift color from orange to red as it fills up
+  ctxArc.setAttribute('stroke', pct > 75 ? '#ff2200' : pct > 40 ? '#FF6B1A' : '#FF9500');
+}
+
+window.electron.onContextUpdate(updateContextArc);
 let bagHovered = false;
 
 function updateTokenBag({ used, budget }) {

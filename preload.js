@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('electron', {
   getTokens: () => ipcRenderer.invoke('get-tokens'),
   setTokenBudget: (n) => ipcRenderer.invoke('set-token-budget', n),
   onTokenUpdate: (cb) => ipcRenderer.on('token-update', (_, t) => cb(t)),
+  onContextUpdate: (cb) => ipcRenderer.on('context-update', (_, pct) => cb(pct)),
   saveFact: (fact) => ipcRenderer.invoke('save-fact', fact),
   deleteFact: (index) => ipcRenderer.invoke('delete-fact', index),
   clearMemory: () => ipcRenderer.invoke('clear-memory'),
