@@ -49,7 +49,7 @@ function projectNameFromPath(filePath) {
 function getLatestAssistantBlock(filePath) {
   try {
     const lines = fs.readFileSync(filePath, 'utf8').trim().split('\n');
-    let sessionTokens = 0;
+    let fileTotalTokens = 0;
     let result = null;
     for (let i = lines.length - 1; i >= 0; i--) {
       try {
@@ -64,7 +64,7 @@ function getLatestAssistantBlock(filePath) {
             win.webContents.send('context-update', ctxPct);
           }
           // Accumulate output tokens across all turns for total session usage
-          sessionTokens += (u.output_tokens || 0) + (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+          fileTotalTokens += (u.output_tokens || 0) + (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0);
         }
         if (!result) {
           const blocks = obj.message.content;
@@ -78,8 +78,9 @@ function getLatestAssistantBlock(filePath) {
         }
       } catch {}
     }
-    if (win && sessionTokens > 0) {
-      win.webContents.send('token-update', { used: sessionTokens, budget: tokenBudget });
+    if (fileTotalTokens > 0) {
+      sessionTokens = fileTotalTokens;
+      broadcastTokens();
     }
     return result;
   } catch {}
@@ -274,36 +275,54 @@ async function saveMessage(msg) {
   } catch {}
 }
 
-// --- Token tracking ---
-let tokenBudget = 500000;
-let tokenUsage = { date: '', used: 0 };
+// --- Token tracking (session + weekly) ---
+let sessionBudget = 500000;
+let weeklyBudget  = 2000000;
+let sessionTokens = 0; // tracked live from JSONL, not persisted
+let weeklyUsage   = { week: '', used: 0 };
+
+function getWeekKey() {
+  const d = new Date();
+  const jan1 = new Date(d.getFullYear(), 0, 1);
+  return `${d.getFullYear()}-W${Math.ceil(((d - jan1) / 86400000 + jan1.getDay() + 1) / 7)}`;
+}
 
 async function loadTokenUsage() {
   try {
     const snap = await getDoc(doc(db, USER_DOC));
     if (snap.exists()) {
-      if (snap.data().tokenUsage) tokenUsage = snap.data().tokenUsage;
-      if (snap.data().tokenBudget) tokenBudget = snap.data().tokenBudget;
+      if (snap.data().weeklyUsage)  weeklyUsage  = snap.data().weeklyUsage;
+      if (snap.data().sessionBudget) sessionBudget = snap.data().sessionBudget;
+      if (snap.data().weeklyBudget)  weeklyBudget  = snap.data().weeklyBudget;
     }
   } catch {}
-  const today = new Date().toDateString();
-  if (tokenUsage.date !== today) tokenUsage = { date: today, used: 0 };
+  if (weeklyUsage.week !== getWeekKey()) weeklyUsage = { week: getWeekKey(), used: 0 };
 }
 
 async function addTokens(n) {
-  const today = new Date().toDateString();
-  if (tokenUsage.date !== today) tokenUsage = { date: today, used: 0 };
-  tokenUsage.used += n;
-  try { await setDoc(doc(db, USER_DOC), { tokenUsage }, { merge: true }); } catch {}
-  if (win) win.webContents.send('token-update', { used: tokenUsage.used, budget: tokenBudget });
+  weeklyUsage.used += n;
+  if (weeklyUsage.week !== getWeekKey()) weeklyUsage = { week: getWeekKey(), used: n };
+  try { await setDoc(doc(db, USER_DOC), { weeklyUsage }, { merge: true }); } catch {}
+  broadcastTokens();
 }
 
-ipcMain.handle('get-tokens', () => ({ used: tokenUsage.used, budget: tokenBudget }));
+function broadcastTokens() {
+  if (win) win.webContents.send('token-update', {
+    sessionUsed: sessionTokens, sessionBudget,
+    weeklyUsed: weeklyUsage.used, weeklyBudget,
+  });
+}
 
-ipcMain.handle('set-token-budget', async (_, budget) => {
-  tokenBudget = budget;
-  try { await setDoc(doc(db, USER_DOC), { tokenBudget }, { merge: true }); } catch {}
-  if (win) win.webContents.send('token-update', { used: tokenUsage.used, budget: tokenBudget });
+ipcMain.handle('get-tokens', () => ({
+  sessionUsed: sessionTokens, sessionBudget,
+  weeklyUsed: weeklyUsage.used, weeklyBudget,
+}));
+
+ipcMain.handle('set-token-budget', async (_, { session, weekly }) => {
+  if (session) sessionBudget = session;
+  if (weekly)  weeklyBudget  = weekly;
+  try { await setDoc(doc(db, USER_DOC), { sessionBudget, weeklyBudget }, { merge: true }); } catch {}
+  broadcastTokens();
 });
 
 // --- Chat ---

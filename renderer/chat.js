@@ -31,42 +31,43 @@ const budgetSlider  = document.getElementById('budget-slider');
 const budgetVal     = document.getElementById('budget-val');
 const tokensUsedEl  = document.getElementById('tokens-used');
 
-const tokenPct  = document.getElementById('token-pct');
-const ctxArc    = document.getElementById('context-arc');
-let ctxArcLen   = 0;
-let currentBobY = 0;
+const tokenPct   = document.getElementById('token-pct');
+const ctxArc     = document.getElementById('context-arc');
+const weeklyArc  = document.getElementById('weekly-arc');
+let ctxArcLen    = 0;
+let currentBobY  = 0;
 
-// Measure the bag outline once the SVG is in the DOM
 requestAnimationFrame(() => {
   if (ctxArc) {
     ctxArcLen = ctxArc.getTotalLength();
-    ctxArc.setAttribute('stroke-dasharray', `0 ${ctxArcLen}`);
+    ctxArc.setAttribute('stroke-dasharray',   `0 ${ctxArcLen}`);
+    weeklyArc.setAttribute('stroke-dasharray', `0 ${ctxArcLen}`);
   }
 });
 
-function updateContextArc(pct) {
-  if (!ctxArc || !ctxArcLen) return;
+function setArc(el, pct, fullColor, lowColor) {
+  if (!el || !ctxArcLen) return;
   const filled = (pct / 100) * ctxArcLen;
-  ctxArc.setAttribute('stroke-dasharray', `${filled} ${ctxArcLen - filled}`);
-  // Shift color from orange to red as it fills up
-  ctxArc.setAttribute('stroke', pct > 75 ? '#ff2200' : pct > 40 ? '#FF6B1A' : '#FF9500');
+  el.setAttribute('stroke-dasharray', `${filled} ${ctxArcLen - filled}`);
+  el.setAttribute('stroke', pct > 50 ? fullColor : pct > 20 ? '#facc15' : lowColor);
 }
 
+function updateContextArc(pct) {
+  setArc(ctxArc, pct, '#FF6B1A', '#ff2200');
+}
 window.electron.onContextUpdate(updateContextArc);
 let bagHovered = false;
 
-function updateTokenBag({ used, budget }) {
-  const pct = Math.max(0, Math.min(100, Math.round((1 - used / budget) * 100)));
-  // Coin stack: translateY 48=empty (all coins below view), 0=full (all coins visible)
-  if (tokenPct) tokenPct.textContent = pct + '% remaining';
+function updateTokenBag({ sessionUsed, sessionBudget, weeklyUsed, weeklyBudget }) {
+  const sPct = Math.max(0, Math.min(100, Math.round((1 - sessionUsed / sessionBudget) * 100)));
+  const wPct = Math.max(0, Math.min(100, Math.round((1 - weeklyUsed  / weeklyBudget)  * 100)));
+  if (tokenPct) tokenPct.textContent = `Session ${sPct}%  ·  Weekly ${wPct}%`;
   const coinFill = document.getElementById('coin-fill');
-  if (coinFill) {
-    const translateY = Math.round(48 * (1 - pct / 100));
-    coinFill.setAttribute('transform', `translate(0,${translateY})`);
-  }
-  budgetSlider.value = budget;
-  budgetVal.textContent = budget.toLocaleString();
-  tokensUsedEl.textContent = used.toLocaleString();
+  if (coinFill) coinFill.setAttribute('transform', `translate(0,${Math.round(48 * (1 - sPct / 100))})`);
+  setArc(weeklyArc, 100 - wPct, '#4ade80', '#ff2200');
+  budgetSlider.value = sessionBudget;
+  budgetVal.textContent = sessionBudget.toLocaleString();
+  tokensUsedEl.textContent = (sessionUsed || 0).toLocaleString();
 }
 
 window.electron.getTokens().then(updateTokenBag);
@@ -93,7 +94,7 @@ budgetSlider.addEventListener('input', () => {
   budgetVal.textContent = parseInt(budgetSlider.value).toLocaleString();
 });
 budgetSlider.addEventListener('change', () => {
-  window.electron.setTokenBudget(parseInt(budgetSlider.value));
+  window.electron.setTokenBudget({ session: parseInt(budgetSlider.value) });
 });
 
 function refreshReminderList(reminders) {
