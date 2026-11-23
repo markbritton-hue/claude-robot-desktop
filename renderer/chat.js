@@ -32,16 +32,17 @@ const budgetSlider  = document.getElementById('budget-slider');
 const budgetVal     = document.getElementById('budget-val');
 const tokensUsedEl  = document.getElementById('tokens-used');
 
+let currentBobY = 0;
+let bagHovered = false;
+
 function updateTokenBag({ used, budget }) {
   const pct = Math.max(0, Math.min(100, Math.round((1 - used / budget) * 100)));
   tokenPct.textContent = pct + '%';
-  // Coin fill: translateY ranges from 36 (empty) to 0 (full) over the 36px fill height
+  // Coin stack: translateY 48=empty (all coins below view), 0=full (all coins visible)
   const coinFill = document.getElementById('coin-fill');
   if (coinFill) {
-    const translateY = Math.round(40 * (1 - pct / 100));
+    const translateY = Math.round(48 * (1 - pct / 100));
     coinFill.setAttribute('transform', `translate(0,${translateY})`);
-    const fillColor = pct > 50 ? 'url(#coin-grad)' : pct > 20 ? '#c8900a' : '#8B1a00';
-    coinFill.setAttribute('fill', fillColor);
   }
   budgetSlider.value = budget;
   budgetVal.textContent = budget.toLocaleString();
@@ -52,15 +53,21 @@ window.electron.getTokens().then(updateTokenBag);
 window.electron.onTokenUpdate(updateTokenBag);
 
 const tokenBagEl = document.getElementById('token-bag');
+
+function applyBagTransform() {
+  if (bagHovered) {
+    tokenBagEl.style.transform = `scale(2) translateY(0px)`;
+  } else {
+    tokenBagEl.style.transform = `scale(1) translateY(${currentBobY}px)`;
+  }
+}
+
 document.addEventListener('robot-bob', e => {
-  tokenBagEl.style.transform = `scale(1) translateY(${e.detail}px)`;
+  currentBobY = e.detail;
+  applyBagTransform();
 });
-tokenBagEl.addEventListener('mouseenter', () => {
-  tokenBagEl.style.transform = `scale(2) translateY(0px)`;
-});
-tokenBagEl.addEventListener('mouseleave', () => {
-  tokenBagEl.style.transform = '';
-});
+tokenBagEl.addEventListener('mouseenter', () => { bagHovered = true;  applyBagTransform(); });
+tokenBagEl.addEventListener('mouseleave', () => { bagHovered = false; applyBagTransform(); });
 
 budgetSlider.addEventListener('input', () => {
   budgetVal.textContent = parseInt(budgetSlider.value).toLocaleString();

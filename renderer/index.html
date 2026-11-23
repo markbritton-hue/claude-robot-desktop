@@ -391,28 +391,59 @@
       <path d="M14,24 Q6,30 5,44 Q4,62 30,63 Q56,62 55,44 Q54,30 46,24 Z"
             fill="url(#leather-grad)" stroke="#2E1500" stroke-width="1.5"/>
 
-      <!-- ── COIN FILL (clipped to bag body) ── -->
-      <g clip-path="url(#bag-clip)">
-        <!-- Fill rect rises from bottom; JS moves translateY 0=full 39=empty -->
-        <rect id="coin-fill" x="4" y="24" width="52" height="40"
-              fill="url(#coin-grad)" transform="translate(0,40)"/>
-        <!-- Coin row lines on top of fill -->
-        <g id="coin-lines" opacity="0.4">
-          <ellipse cx="30" cy="58" rx="22" ry="3" fill="none" stroke="#b8860b" stroke-width="1.2"/>
-          <ellipse cx="30" cy="52" rx="22" ry="3" fill="none" stroke="#b8860b" stroke-width="1.2"/>
-          <ellipse cx="30" cy="46" rx="22" ry="3" fill="none" stroke="#b8860b" stroke-width="1.2"/>
-          <ellipse cx="30" cy="40" rx="22" ry="3" fill="none" stroke="#b8860b" stroke-width="1.2"/>
-          <ellipse cx="30" cy="34" rx="22" ry="3" fill="none" stroke="#b8860b" stroke-width="1.2"/>
-          <ellipse cx="30" cy="28" rx="22" ry="3" fill="none" stroke="#b8860b" stroke-width="1.2"/>
+      <!-- ── COIN STACK (clipped to bag, rises from bottom) ── -->
+      <g clip-path="url(#bag-clip)" id="coin-stack">
+        <!-- 8 coin layers — JS shows/hides by moving the group up -->
+        <!-- Each coin = thick ellipse (face) + thin ellipse (edge highlight) -->
+        <g id="coin-fill" transform="translate(0,48)">
+          <!-- coin 1 (bottom) -->
+          <ellipse cx="30" cy="60" rx="18" ry="4.5" fill="#7a5000"/>
+          <ellipse cx="30" cy="58" rx="18" ry="4.5" fill="#c8900a"/>
+          <ellipse cx="30" cy="57" rx="18" ry="4" fill="url(#coin-grad)"/>
+          <ellipse cx="30" cy="56.5" rx="14" ry="2.5" fill="rgba(255,240,100,0.3)"/>
+          <!-- coin 2 -->
+          <ellipse cx="30" cy="54" rx="18" ry="4.5" fill="#7a5000"/>
+          <ellipse cx="30" cy="52" rx="18" ry="4.5" fill="#c8900a"/>
+          <ellipse cx="30" cy="51" rx="18" ry="4" fill="url(#coin-grad)"/>
+          <ellipse cx="30" cy="50.5" rx="14" ry="2.5" fill="rgba(255,240,100,0.3)"/>
+          <!-- coin 3 -->
+          <ellipse cx="30" cy="48" rx="18" ry="4.5" fill="#7a5000"/>
+          <ellipse cx="30" cy="46" rx="18" ry="4.5" fill="#c8900a"/>
+          <ellipse cx="30" cy="45" rx="18" ry="4" fill="url(#coin-grad)"/>
+          <ellipse cx="30" cy="44.5" rx="14" ry="2.5" fill="rgba(255,240,100,0.3)"/>
+          <!-- coin 4 -->
+          <ellipse cx="30" cy="42" rx="17" ry="4.5" fill="#7a5000"/>
+          <ellipse cx="30" cy="40" rx="17" ry="4.5" fill="#c8900a"/>
+          <ellipse cx="30" cy="39" rx="17" ry="4" fill="url(#coin-grad)"/>
+          <ellipse cx="30" cy="38.5" rx="13" ry="2.5" fill="rgba(255,240,100,0.3)"/>
+          <!-- coin 5 -->
+          <ellipse cx="30" cy="36" rx="16" ry="4.5" fill="#7a5000"/>
+          <ellipse cx="30" cy="34" rx="16" ry="4.5" fill="#c8900a"/>
+          <ellipse cx="30" cy="33" rx="16" ry="4" fill="url(#coin-grad)"/>
+          <ellipse cx="30" cy="32.5" rx="12" ry="2.5" fill="rgba(255,240,100,0.3)"/>
+          <!-- coin 6 -->
+          <ellipse cx="30" cy="30" rx="15" ry="4.5" fill="#7a5000"/>
+          <ellipse cx="30" cy="28" rx="15" ry="4.5" fill="#c8900a"/>
+          <ellipse cx="30" cy="27" rx="15" ry="4" fill="url(#coin-grad)"/>
+          <ellipse cx="30" cy="26.5" rx="11" ry="2.5" fill="rgba(255,240,100,0.3)"/>
+          <!-- coin 7 -->
+          <ellipse cx="30" cy="24" rx="13" ry="4" fill="#7a5000"/>
+          <ellipse cx="30" cy="22" rx="13" ry="4" fill="#c8900a"/>
+          <ellipse cx="30" cy="21" rx="13" ry="3.5" fill="url(#coin-grad)"/>
+          <ellipse cx="30" cy="20.5" rx="9" ry="2" fill="rgba(255,240,100,0.3)"/>
+          <!-- coin 8 (top) -->
+          <ellipse cx="30" cy="18" rx="11" ry="3.5" fill="#7a5000"/>
+          <ellipse cx="30" cy="16" rx="11" ry="3.5" fill="#c8900a"/>
+          <ellipse cx="30" cy="15" rx="11" ry="3" fill="url(#coin-grad)"/>
+          <ellipse cx="30" cy="14.5" rx="7" ry="1.8" fill="rgba(255,240,100,0.3)"/>
         </g>
       </g>
 
       <!-- ── LEATHER STITCH LINES ── -->
       <path d="M14,24 Q6,30 5,44 Q4,62 30,63 Q56,62 55,44 Q54,30 46,24 Z"
-            fill="none" stroke="#2E1500" stroke-width="1.5"
-            stroke-dasharray="3,2.5" opacity="0.5"/>
-      <!-- Side seam -->
-      <path d="M30,25 Q30,44 30,62" stroke="#2E1500" stroke-width="0.7" stroke-dasharray="2,3" opacity="0.3" fill="none"/>
+            fill="none" stroke="#3D2000" stroke-width="1.5"
+            stroke-dasharray="3,2.5" opacity="0.6"/>
+      <path d="M30,25 Q30,44 30,62" stroke="#3D2000" stroke-width="0.7" stroke-dasharray="2,3" opacity="0.25" fill="none"/>
 
       <!-- ── LEATHER HIGHLIGHT ── -->
       <path d="M14,24 Q6,30 5,44 Q4,62 30,63 Q56,62 55,44 Q54,30 46,24 Z"
@@ -425,18 +456,10 @@
             fill="#7A4020" stroke="#2E1500" stroke-width="0.8"/>
 
       <!-- ── ROPE TIE ── -->
-      <!-- Main knot -->
       <ellipse cx="30" cy="13" rx="7" ry="4" fill="url(#rope-grad)" stroke="#2E1500" stroke-width="1"/>
-      <!-- Rope loops left -->
       <path d="M23,13 Q16,6 20,4 Q24,2 26,8" fill="none" stroke="url(#rope-grad)" stroke-width="2.5" stroke-linecap="round"/>
-      <!-- Rope loops right -->
       <path d="M37,13 Q44,6 40,4 Q36,2 34,8" fill="none" stroke="url(#rope-grad)" stroke-width="2.5" stroke-linecap="round"/>
-      <!-- Knot centre bump -->
       <ellipse cx="30" cy="13" rx="4" ry="2.5" fill="#A0724A" stroke="#2E1500" stroke-width="0.7"/>
-
-      <!-- ── COIN SYMBOL on bag ── -->
-      <text x="30" y="47" text-anchor="middle" font-size="13" font-weight="900"
-            fill="rgba(255,210,60,0.18)" font-family="Georgia,serif">₵</text>
     </svg>
     <div id="token-pct">100%</div>
   </div>
