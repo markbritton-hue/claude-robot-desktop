@@ -53,6 +53,13 @@ function getLatestAssistantBlock(filePath) {
       try {
         const obj = JSON.parse(lines[i]);
         if (!obj.message || obj.message.role !== 'assistant') continue;
+        // Extract context window usage from this Claude Code session
+        const u = obj.message.usage;
+        if (u && win) {
+          const totalCtx = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+          const ctxPct = Math.min(100, Math.round((totalCtx / 200000) * 100));
+          win.webContents.send('context-update', ctxPct);
+        }
         const blocks = obj.message.content;
         if (!Array.isArray(blocks)) continue;
         for (const block of blocks) {
@@ -300,9 +307,7 @@ ipcMain.handle('chat-message', async (_, userMsg) => {
   });
   const reply = res.content[0].text;
   const tokensUsed = (res.usage?.input_tokens || 0) + (res.usage?.output_tokens || 0);
-  const contextPct = Math.min(100, Math.round(((res.usage?.input_tokens || 0) / 200000) * 100));
   await addTokens(tokensUsed);
-  if (win) win.webContents.send('context-update', contextPct);
   history.push({ role: 'assistant', content: reply });
   await saveMessage({ role: 'assistant', content: reply });
   if (history.length > 40) history.splice(0, 2);
