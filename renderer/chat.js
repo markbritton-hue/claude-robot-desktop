@@ -27,7 +27,6 @@ const memoryCountS = document.getElementById('memory-count-s');
 
 const reminderList  = document.getElementById('reminder-list');
 const reminderCount = document.getElementById('reminder-count');
-const tokenBar      = document.getElementById('token-bar');
 const tokenPct      = document.getElementById('token-pct');
 const budgetSlider  = document.getElementById('budget-slider');
 const budgetVal     = document.getElementById('budget-val');
@@ -35,9 +34,16 @@ const tokensUsedEl  = document.getElementById('tokens-used');
 
 function updateTokenBag({ used, budget }) {
   const pct = Math.max(0, Math.min(100, Math.round((1 - used / budget) * 100)));
-  tokenBar.style.width = pct + '%';
   tokenPct.textContent = pct + '%';
-  tokenBar.style.background = pct > 50 ? '#4ade80' : pct > 20 ? '#facc15' : '#f87171';
+  // Coin fill: translateY ranges from 36 (empty) to 0 (full) over the 36px fill height
+  const coinFill = document.getElementById('coin-fill');
+  if (coinFill) {
+    const translateY = Math.round(36 * (1 - pct / 100));
+    coinFill.setAttribute('transform', `translate(0,${translateY})`);
+    // Color shifts gold → yellow → red as it depletes
+    const fillColor = pct > 50 ? 'url(#coin-grad)' : pct > 20 ? '#d4a000' : '#c0392b';
+    coinFill.setAttribute('fill', fillColor);
+  }
   budgetSlider.value = budget;
   budgetVal.textContent = budget.toLocaleString();
   tokensUsedEl.textContent = used.toLocaleString();
