@@ -4,12 +4,18 @@ function setClaudeState(s) { document.dispatchEvent(new CustomEvent('set-claude-
 
 // --- Antenna drag (moves the window) ---
 const antennaDrag = document.getElementById('antenna-drag');
+const moveHint    = document.getElementById('move-hint');
 
-antennaDrag.addEventListener('mouseenter', () => {
-  document.dispatchEvent(new CustomEvent('antenna-hover', { detail: true }));
-});
-antennaDrag.addEventListener('mouseleave', () => {
-  if (!winDragging) document.dispatchEvent(new CustomEvent('antenna-hover', { detail: false }));
+// -webkit-app-region:drag suppresses mouseenter/leave, so track hover via mousemove position
+let antennaOver = false;
+document.addEventListener('mousemove', e => {
+  const r = antennaDrag.getBoundingClientRect();
+  const over = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+  if (over !== antennaOver) {
+    antennaOver = over;
+    document.dispatchEvent(new CustomEvent('antenna-hover', { detail: over }));
+    if (moveHint) moveHint.classList.toggle('visible', over);
+  }
 });
 // Window drag is handled natively via -webkit-app-region:drag on #antenna-drag
 

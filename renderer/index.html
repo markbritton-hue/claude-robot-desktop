@@ -196,6 +196,18 @@
       transform-origin: bottom left;
       transition: transform 0.2s ease;
     }
+    #move-hint {
+      position: absolute;
+      bottom: 282px; left: 108px;
+      width: 84px;
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      z-index: 25;
+      transition: opacity 0.2s ease;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,0.9));
+    }
+    #move-hint.visible { opacity: 1; }
     #token-bag { transition: transform 0.15s ease; }
     #token-bag-svg { filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6)); }
     @keyframes bag-pulse-red { 0%,100% { filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6)); } 50% { filter: drop-shadow(0 0 10px rgba(255,0,0,0.9)) drop-shadow(0 2px 4px rgba(0,0,0,0.6)); } }
@@ -367,14 +379,28 @@
   <!-- Antenna drag handle — positioned over the antenna ball -->
   <div id="antenna-drag" title="Drag to move" style="
     position:absolute;
-    bottom:216px; left:128px;
-    width:44px; height:52px;
+    bottom:210px; left:116px;
+    width:68px; height:68px;
     cursor:grab;
     z-index:20;
     pointer-events:all;
     -webkit-app-region:drag;
     background:transparent;
   "></div>
+  <div id="move-hint">
+    <svg viewBox="0 0 48 48" width="64" height="64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- Up arrow -->
+      <polygon points="24,2 18,12 21,12 21,22 27,22 27,12 30,12" fill="white" stroke="rgba(0,0,0,0.6)" stroke-width="1"/>
+      <!-- Down arrow -->
+      <polygon points="24,46 30,36 27,36 27,26 21,26 21,36 18,36" fill="white" stroke="rgba(0,0,0,0.6)" stroke-width="1"/>
+      <!-- Left arrow -->
+      <polygon points="2,24 12,18 12,21 22,21 22,27 12,27 12,30" fill="white" stroke="rgba(0,0,0,0.6)" stroke-width="1"/>
+      <!-- Right arrow -->
+      <polygon points="46,24 36,30 36,27 26,27 26,21 36,21 36,18" fill="white" stroke="rgba(0,0,0,0.6)" stroke-width="1"/>
+      <!-- Center dot -->
+      <circle cx="24" cy="24" r="3" fill="rgba(255,180,80,0.9)"/>
+    </svg>
+  </div>
   <!-- Transparent overlay to catch robot clicks -->
   <div id="robot-click-area"></div>
 
