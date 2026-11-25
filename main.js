@@ -1,0 +1,642 @@
+const path = require('path');
+const fs = require('fs');
+// When packaged, .env lives in resourcesPath; in dev it's next to main.js
+const _envFile = path.join(process.resourcesPath || '', '.env');
+require('dotenv').config({ path: fs.existsSync(_envFile) ? _envFile : path.join(__dirname, '.env') });
+const { app, BrowserWindow, ipcMain, screen, Notification } = require('electron');
+// Force DirectShow camera path — avoids MF hardware MFT error (0xC00D3704) in Electron on Windows
+app.commandLine.appendSwitch('disable-features', 'MediaFoundationVideoCapture');
+const { exec } = require('child_process');
+const os = require('os');
+const https = require('https');
+const Anthropic = require('@anthropic-ai/sdk');
+const { google } = require('googleapis');
+const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
+
+// Firebase
+const { initializeApp: initFirebase } = require('firebase/app');
+const { getFirestore, doc, getDoc, setDoc, collection, getDocs, addDoc, deleteDoc, query, orderBy, limit } = require('firebase/firestore');
+
+const firebaseApp = initFirebase({
+  apiKey: process.env.FIREBASE_API_KEY,
+  authDomain: 'clauderobot.firebaseapp.com',
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  storageBucket: 'clauderobot.firebasestorage.app',
+  messagingSenderId: '719034857796',
+  appId: '1:719034857796:web:ff0880355d421736ffbf11',
+});
+const db = getFirestore(firebaseApp);
+const USER_DOC = 'users/mark';
+
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const history = [];
+
+// --- Notify helper ---
+function notify(title, body, speak = true) {
+  if (Notification.isSupported()) new Notification({ title, body, silent: true }).show();
+  if (win) win.webContents.send('monitor-alert', { title, body, speak });
+}
+
+// --- Claude transcript watcher (replaces OBS overlay dependency) ---
+const CLAUDE_PROJECTS = path.join(os.homedir(), '.claude', 'projects');
+const debounceTimers = {};
+
+function projectNameFromPath(filePath) {
+  const parts = filePath.split(path.sep);
+  const idx = parts.lastIndexOf('projects');
+  if (idx < 0) return null;
+  const folder = parts[idx + 1] || '';
+  const segments = folder.split('--');
+  return segments[segments.length - 1] || null;
+}
+
+function getLatestAssistantBlock(filePath, trackTokens = false) {
+  try {
+    const lines = fs.readFileSync(filePath, 'utf8').trim().split('\n');
+    let fileTotalTokens = 0;
+    let result = null;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const obj = JSON.parse(lines[i]);
+        if (!obj.message || obj.message.role !== 'assistant') continue;
+        const u = obj.message.usage;
+        if (u) {
+          // Context % from the latest turn (input includes full context)
+          if (!result && win) {
+            const totalCtx = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+            const ctxPct = Math.min(100, Math.round((totalCtx / 200000) * 100));
+            win.webContents.send('context-update', ctxPct);
+          }
+          // Count only output + cache_creation; input is cached context re-sent every turn and inflates the total
+          fileTotalTokens += (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0);
+        }
+        if (!result) {
+          const blocks = obj.message.content;
+          if (Array.isArray(blocks)) {
+            for (const block of blocks) {
+              if (block.type === 'thinking') { result = { type: 'thinking' }; break; }
+              if (block.type === 'tool_use') { result = { type: 'tool_use', name: block.name }; break; }
+              if (block.type === 'text' && block.text?.trim()) { result = { type: 'text', text: block.text.trim() }; break; }
+            }
+          }
+        }
+      } catch {}
+    }
+    if (fileTotalTokens > 0) {
+      if (trackTokens) {
+        // Only count tokens added since app start (delta from baseline)
+        const baseline = fileTokenBaseline[filePath] || 0;
+        const delta = Math.max(0, fileTotalTokens - baseline);
+        if (delta > 0) { sessionTokens += delta; broadcastTokens(); }
+        fileTokenBaseline[filePath] = fileTotalTokens;
+      } else {
+        // Initial scan: record baseline, don't add to session budget
+        fileTokenBaseline[filePath] = fileTotalTokens;
+      }
+    }
+    return result;
+  } catch {}
+  return null;
+}
+
+function onTranscriptChange(filePath) {
+  if (debounceTimers[filePath]) clearTimeout(debounceTimers[filePath]);
+  debounceTimers[filePath] = setTimeout(() => {
+    const block = getLatestAssistantBlock(filePath, true);
+    if (!block || !win) return;
+    const project = projectNameFromPath(filePath);
+
+    if (block.type === 'thinking') {
+      win.webContents.send('claude-status', { type: 'thinking', message: 'Thinking...', project });
+    } else if (block.type === 'tool_use') {
+      win.webContents.send('claude-status', { type: 'working', message: `Using ${block.name}...`, project });
+    } else if (block.type === 'text') {
+      if (/\?\s*$/.test(block.text)) {
+        const trimmed = block.text.length > 350 ? block.text.slice(0, 347) + '...' : block.text;
+        win.webContents.send('claude-status', { type: 'question', message: trimmed, project });
+      } else {
+        win.webContents.send('claude-status', { type: 'idle', message: '', project: null });
+      }
+    }
+  }, 300);
+}
+
+function scanExistingTranscripts() {
+  // Find all .jsonl files modified in the last 24h and do an initial read
+  try {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const projects = fs.readdirSync(CLAUDE_PROJECTS);
+    let newestFile = null, newestMtime = 0;
+    for (const proj of projects) {
+      const dir = path.join(CLAUDE_PROJECTS, proj);
+      if (!fs.statSync(dir).isDirectory()) continue;
+      for (const f of fs.readdirSync(dir)) {
+        if (!f.endsWith('.jsonl')) continue;
+        const fp = path.join(dir, f);
+        const mtime = fs.statSync(fp).mtimeMs;
+        if (mtime > cutoff && mtime > newestMtime) { newestMtime = mtime; newestFile = fp; }
+      }
+    }
+    if (newestFile) getLatestAssistantBlock(newestFile);
+  } catch {}
+}
+
+function watchStatus() {
+  if (!fs.existsSync(CLAUDE_PROJECTS)) return;
+  fs.watch(CLAUDE_PROJECTS, { recursive: true }, (_, filename) => {
+    if (!filename || !filename.endsWith('.jsonl')) return;
+    const filePath = path.join(CLAUDE_PROJECTS, filename);
+    onTranscriptChange(filePath);
+  });
+}
+
+// --- Memory (Firestore) ---
+let memory = { facts: [] };
+
+async function loadMemory() {
+  try {
+    const snap = await getDoc(doc(db, USER_DOC));
+    if (snap.exists()) {
+      memory = snap.data();
+      if (!Array.isArray(memory.facts)) memory.facts = [];
+    }
+  } catch { memory = { facts: [] }; }
+}
+
+async function saveMemory() {
+  await setDoc(doc(db, USER_DOC), memory, { merge: true });
+}
+
+function memorySystemPrompt() {
+  if (!memory.facts.length) return '';
+  return '\n\nThings you remember about the user:\n' + memory.facts.map(f => `- ${f}`).join('\n');
+}
+
+ipcMain.handle('get-memory', () => memory.facts);
+ipcMain.handle('get-history', () => history);
+
+ipcMain.handle('save-fact', async (_, fact) => {
+  const trimmed = fact.trim();
+  if (trimmed && !memory.facts.includes(trimmed)) {
+    memory.facts.push(trimmed);
+    await saveMemory();
+  }
+  return memory.facts;
+});
+
+ipcMain.handle('delete-fact', async (_, index) => {
+  memory.facts.splice(index, 1);
+  await saveMemory();
+  return memory.facts;
+});
+
+ipcMain.handle('clear-memory', async () => {
+  memory.facts = [];
+  await saveMemory();
+  return memory.facts;
+});
+
+// --- Reminders (Firestore) ---
+let reminders = [];
+
+async function loadReminders() {
+  try {
+    const snap = await getDocs(query(collection(db, `${USER_DOC}/reminders`)));
+    reminders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch { reminders = []; }
+}
+
+ipcMain.handle('get-reminders', () => reminders);
+
+ipcMain.handle('add-reminder', async (_, { text, time }) => {
+  const docRef = await addDoc(collection(db, `${USER_DOC}/reminders`), { text, time, fired: false });
+  reminders.push({ id: docRef.id, text, time, fired: false });
+  return reminders;
+});
+
+ipcMain.handle('delete-reminder', async (_, id) => {
+  await deleteDoc(doc(db, `${USER_DOC}/reminders/${id}`));
+  reminders = reminders.filter(r => r.id !== id);
+  return reminders;
+});
+
+function checkReminders() {
+  const now = Date.now();
+  for (const r of reminders) {
+    if (!r.fired && r.time <= now) {
+      r.fired = true;
+      deleteDoc(doc(db, `${USER_DOC}/reminders/${r.id}`)).catch(() => {});
+      reminders = reminders.filter(x => x.id !== r.id);
+      notify('Reminder', r.text, true);
+    }
+  }
+}
+
+// --- Weather monitoring ---
+const WEATHER_LAT = 41.9439;
+const WEATHER_LON = -85.6333;
+let lastWeatherCode = -1;
+let lastWeatherTemp = null;
+
+const WMO_DESC = {
+  0: 'Clear sky', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
+  45: 'Foggy', 48: 'Freezing fog',
+  51: 'Light drizzle', 53: 'Drizzle', 55: 'Heavy drizzle',
+  61: 'Light rain', 63: 'Rain', 65: 'Heavy rain',
+  71: 'Light snow', 73: 'Snow', 75: 'Heavy snow',
+  77: 'Snow grains',
+  80: 'Rain showers', 81: 'Rain showers', 82: 'Violent rain showers',
+  85: 'Snow showers', 86: 'Heavy snow showers',
+  95: 'Thunderstorm', 96: 'Thunderstorm with hail', 99: 'Severe thunderstorm',
+};
+
+ipcMain.handle('get-weather', () => {
+  if (lastWeatherTemp === null) return null;
+  return { temp: lastWeatherTemp, code: lastWeatherCode, desc: WMO_DESC[lastWeatherCode] || 'Unknown' };
+});
+
+const WEATHER_ALERTS = {
+  51: 'Light drizzle starting', 53: 'Drizzle outside', 55: 'Heavy drizzle outside',
+  61: 'Light rain starting', 63: 'Rain outside', 65: 'Heavy rain outside',
+  71: 'Light snow starting', 73: 'Snow outside', 75: 'Heavy snow outside',
+  80: 'Rain showers starting', 81: 'Rain showers outside', 82: 'Violent rain showers',
+  95: 'Thunderstorm outside!', 96: 'Thunderstorm with hail!', 99: 'Severe thunderstorm!',
+};
+
+function fetchWeather() {
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${WEATHER_LAT}&longitude=${WEATHER_LON}&current=weather_code,temperature_2m&temperature_unit=fahrenheit`;
+  https.get(url, res => {
+    let data = '';
+    res.on('data', d => data += d);
+    res.on('end', () => {
+      try {
+        const json = JSON.parse(data);
+        const code = json.current.weather_code;
+        const temp = Math.round(json.current.temperature_2m);
+        lastWeatherTemp = temp;
+        if (code !== lastWeatherCode) {
+          lastWeatherCode = code;
+          const alert = WEATHER_ALERTS[code];
+          if (alert) notify('Weather Alert', `${alert} — ${temp}°F`, true);
+        }
+      } catch {}
+    });
+  }).on('error', () => {});
+}
+
+// --- Conversation history (Firestore) ---
+async function loadHistory() {
+  try {
+    const snap = await getDocs(query(
+      collection(db, `${USER_DOC}/conversations`),
+      orderBy('ts'), limit(20)
+    ));
+    snap.docs.forEach(d => history.push(d.data().msg));
+  } catch {}
+}
+
+async function saveMessage(msg) {
+  try {
+    await addDoc(collection(db, `${USER_DOC}/conversations`), { msg, ts: Date.now() });
+    // Keep only last 40 messages in Firestore
+    const snap = await getDocs(query(collection(db, `${USER_DOC}/conversations`), orderBy('ts')));
+    if (snap.docs.length > 40) {
+      const toDelete = snap.docs.slice(0, snap.docs.length - 40);
+      for (const d of toDelete) await deleteDoc(d.ref);
+    }
+  } catch {}
+}
+
+// --- Token tracking (session + weekly) ---
+let sessionBudget = 500000;
+let weeklyBudget  = 2000000;
+let sessionTokens = 0; // tracked live from JSONL, not persisted
+const fileTokenBaseline = {}; // tokens per file at app start, for delta tracking
+let weeklyUsage   = { week: '', used: 0 };
+let robotSessionOutput = 0; // output tokens from robot's own API calls this run
+let robotContextPct = 0;    // context window % from robot's latest API call
+
+function getWeekKey() {
+  const d = new Date();
+  const jan1 = new Date(d.getFullYear(), 0, 1);
+  return `${d.getFullYear()}-W${Math.ceil(((d - jan1) / 86400000 + jan1.getDay() + 1) / 7)}`;
+}
+
+async function loadTokenUsage() {
+  try {
+    const snap = await getDoc(doc(db, USER_DOC));
+    if (snap.exists()) {
+      if (snap.data().weeklyUsage)  weeklyUsage  = snap.data().weeklyUsage;
+      if (snap.data().sessionBudget) sessionBudget = snap.data().sessionBudget;
+      if (snap.data().weeklyBudget)  weeklyBudget  = snap.data().weeklyBudget;
+    }
+  } catch {}
+  if (weeklyUsage.week !== getWeekKey()) weeklyUsage = { week: getWeekKey(), used: 0 };
+}
+
+async function addTokens(n) {
+  weeklyUsage.used += n;
+  if (weeklyUsage.week !== getWeekKey()) weeklyUsage = { week: getWeekKey(), used: n };
+  try { await setDoc(doc(db, USER_DOC), { weeklyUsage }, { merge: true }); } catch {}
+  broadcastTokens();
+}
+
+function broadcastTokens() {
+  if (win) win.webContents.send('token-update', {
+    sessionUsed: sessionTokens, sessionBudget,
+    weeklyUsed: weeklyUsage.used, weeklyBudget,
+    robotSessionOutput, robotContextPct,
+  });
+}
+
+ipcMain.handle('get-tokens', () => ({
+  sessionUsed: sessionTokens, sessionBudget,
+  weeklyUsed: weeklyUsage.used, weeklyBudget,
+  robotSessionOutput, robotContextPct,
+}));
+
+ipcMain.handle('set-token-budget', async (_, { session, weekly }) => {
+  if (session) sessionBudget = session;
+  if (weekly)  weeklyBudget  = weekly;
+  try { await setDoc(doc(db, USER_DOC), { sessionBudget, weeklyBudget }, { merge: true }); } catch {}
+  broadcastTokens();
+});
+
+// --- Chat ---
+ipcMain.handle('chat-message', async (_, userMsg) => {
+  history.push({ role: 'user', content: userMsg });
+  await saveMessage({ role: 'user', content: userMsg });
+
+  const res = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 256,
+    system: 'You are a friendly desktop robot companion named Claude. You are small, fun, and helpful. Keep replies short — 1-3 sentences max. Be warm and a little playful.' + memorySystemPrompt(),
+    messages: history,
+  });
+  const reply = res.content[0].text;
+  const tokensUsed = (res.usage?.input_tokens || 0) + (res.usage?.output_tokens || 0);
+  robotSessionOutput += (res.usage?.output_tokens || 0);
+  robotContextPct = Math.min(100, Math.round(((res.usage?.input_tokens || 0) / 200000) * 100));
+  broadcastTokens();
+  await addTokens(tokensUsed);
+  history.push({ role: 'assistant', content: reply });
+  await saveMessage({ role: 'assistant', content: reply });
+  if (history.length > 40) history.splice(0, 2);
+  return reply;
+});
+
+// --- Edge TTS ---
+const EDGE_VOICES = [
+  { id: 'en-US-JennyNeural',   name: 'Jenny (US Female)' },
+  { id: 'en-US-GuyNeural',     name: 'Guy (US Male)' },
+  { id: 'en-US-AriaNeural',    name: 'Aria (US Female)' },
+  { id: 'en-GB-SoniaNeural',   name: 'Sonia (UK Female)' },
+  { id: 'en-GB-RyanNeural',    name: 'Ryan (UK Male)' },
+  { id: 'en-AU-NatashaNeural', name: 'Natasha (AU Female)' },
+];
+
+ipcMain.handle('get-edge-voices', () => EDGE_VOICES);
+
+ipcMain.handle('speak-edge', async (_, { text, voiceId, rate, pitch }) => {
+  try {
+    const tts = new MsEdgeTTS();
+    const voice = voiceId || 'en-US-JennyNeural';
+    await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+    const { audioStream } = await tts.toStream(text);
+    const chunks = [];
+    await new Promise((resolve, reject) => {
+      audioStream.on('data', d => chunks.push(d));
+      audioStream.on('end', resolve);
+      audioStream.on('error', reject);
+    });
+    return Buffer.concat(chunks).toString('base64');
+  } catch (e) {
+    console.error('[edge-tts]', e.message);
+    return null;
+  }
+});
+
+// --- Speech recognition ---
+ipcMain.handle('start-listening', () => {
+  return new Promise((resolve, reject) => {
+    const script = [
+      'Add-Type -AssemblyName System.Speech',
+      '$rec = New-Object System.Speech.Recognition.SpeechRecognitionEngine',
+      '$rec.SetInputToDefaultAudioDevice()',
+      '$grammar = New-Object System.Speech.Recognition.DictationGrammar',
+      '$rec.LoadGrammar($grammar)',
+      '$rec.BabbleTimeout = [TimeSpan]::FromSeconds(3)',
+      '$rec.InitialSilenceTimeout = [TimeSpan]::FromSeconds(5)',
+      '$result = $rec.Recognize([TimeSpan]::FromSeconds(8))',
+      'if ($result) { Write-Output $result.Text } else { Write-Output "" }',
+      '$rec.Dispose()',
+    ].join('\r\n');
+    const tmpFile = path.join(os.tmpdir(), 'claude-listen.ps1');
+    fs.writeFileSync(tmpFile, script, 'utf8');
+    exec(`powershell -ExecutionPolicy Bypass -File "${tmpFile}"`, { timeout: 15000 }, (err, stdout, stderr) => {
+      fs.unlinkSync(tmpFile);
+      if (err) { reject(new Error(stderr || err.message)); return; }
+      resolve(stdout.trim());
+    });
+  });
+});
+
+// --- Google Calendar ---
+const _resPath = process.resourcesPath || __dirname;
+const GCREDS_PATH = fs.existsSync(path.join(_resPath, 'google-credentials.json'))
+  ? path.join(_resPath, 'google-credentials.json') : path.join(__dirname, 'google-credentials.json');
+const GTOKEN_PATH = fs.existsSync(path.join(_resPath, 'google-token.json'))
+  ? path.join(_resPath, 'google-token.json') : path.join(__dirname, 'google-token.json');
+let calendarAuth = null;
+
+async function getCalendarAuth() {
+  if (!fs.existsSync(GCREDS_PATH)) return null;
+  const { client_id, client_secret, redirect_uris } = JSON.parse(fs.readFileSync(GCREDS_PATH)).installed;
+  const oAuth2 = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
+
+  if (fs.existsSync(GTOKEN_PATH)) {
+    oAuth2.setCredentials(JSON.parse(fs.readFileSync(GTOKEN_PATH)));
+    return oAuth2;
+  }
+
+  // First run — open browser for auth
+  const authUrl = oAuth2.generateAuthUrl({
+    access_type: 'offline',
+    scope: ['https://www.googleapis.com/auth/calendar'],
+  });
+
+  const { shell } = require('electron');
+  shell.openExternal(authUrl);
+
+  // Listen on localhost for the redirect code
+  return new Promise((resolve) => {
+    const http = require('http');
+    const server = http.createServer(async (req, res) => {
+      const code = new URL(req.url, 'http://localhost').searchParams.get('code');
+      if (!code) { res.end('No code'); return; }
+      res.end('<h2>Authorized! You can close this tab.</h2>');
+      server.close();
+      const { tokens } = await oAuth2.getToken(code);
+      oAuth2.setCredentials(tokens);
+      fs.writeFileSync(GTOKEN_PATH, JSON.stringify(tokens));
+      calendarAuth = oAuth2;
+      resolve(oAuth2);
+    });
+    server.listen(80, () => console.log('Waiting for Google auth on port 80...'));
+  });
+}
+
+async function checkCalendar() {
+  if (!calendarAuth) return;
+  try {
+    const cal = google.calendar({ version: 'v3', auth: calendarAuth });
+    const now = new Date();
+    const soon = new Date(now.getTime() + 15 * 60 * 1000); // next 15 min
+    const res = await cal.events.list({
+      calendarId: 'primary',
+      timeMin: now.toISOString(),
+      timeMax: soon.toISOString(),
+      singleEvents: true,
+      orderBy: 'startTime',
+    });
+    const events = res.data.items || [];
+    for (const ev of events) {
+      const start = ev.start.dateTime || ev.start.date;
+      const startTime = new Date(start);
+      const minsAway = Math.round((startTime - now) / 60000);
+      const label = minsAway <= 1 ? 'starting now' : `in ${minsAway} minutes`;
+      notify('Calendar', `${ev.summary} ${label}`, true);
+    }
+  } catch (e) {
+    console.error('[calendar]', e.message);
+  }
+}
+
+let win;
+
+function createWindow() {
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+  win = new BrowserWindow({
+    width: 300, height: 500,
+    x: width - 320, y: height - 520,
+    transparent: true, frame: false, alwaysOnTop: true,
+    skipTaskbar: true, resizable: false,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true }
+  });
+
+  win.loadFile('renderer/index.html');
+  win.setIgnoreMouseEvents(false);
+  // win.webContents.openDevTools({ mode: 'detach' });
+
+  win.webContents.once('did-finish-load', async () => {
+    await loadMemory();
+    await loadReminders();
+    await loadHistory();
+    await loadTokenUsage();
+    // Push history and reminders to renderer now that they're loaded
+    win.webContents.send('init-data', { history, reminders });
+    watchStatus();
+    // Delay initial scan so renderer has time to register its IPC listeners
+    setTimeout(scanExistingTranscripts, 2000);
+    fetchWeather();
+    setInterval(checkReminders, 30000);
+    setInterval(fetchWeather, 30 * 60 * 1000);
+    getCalendarAuth().then(auth => {
+      if (auth) {
+        calendarAuth = auth;
+        checkCalendar();
+        setInterval(checkCalendar, 5 * 60 * 1000); // check every 5 min
+      }
+    });
+  });
+
+  win.webContents.session.setPermissionRequestHandler((wc, permission, callback) => {
+    callback(permission === 'media');
+  });
+}
+
+app.whenReady().then(createWindow);
+app.on('window-all-closed', () => app.quit());
+
+ipcMain.on('set-ignore-mouse', (_, ignore) => {
+  win.setIgnoreMouseEvents(ignore, { forward: true });
+});
+
+ipcMain.on('quit-app', () => app.quit());
+ipcMain.on('move-window', (_, { x, y }) => {
+  if (!win) return;
+  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
+  const [ww, wh] = win.getSize();
+  const cx = Math.max(0, Math.min(Math.round(x), sw - ww));
+  const cy = Math.max(0, Math.min(Math.round(y), sh - wh));
+  win.setPosition(cx, cy);
+});
+ipcMain.on('lock-workstation', () => { exec('rundll32.exe user32.dll,LockWorkStation'); });
+
+// --- VISCA over IP (Avkans PTZ camera) ---
+const dgram = require('dgram');
+const VISCA_HOST = '192.168.0.207';
+const VISCA_PORT = 52381;
+let viscaSocket = null;
+let viscaSeq = 1;
+let viscaTrackingEnabled = null; // null = unknown
+
+function viscaPkt(type2, payload) {
+  // VISCA over IP header: [0x01, type2, payloadLen(2), seqNum(4)] + payload
+  const buf = Buffer.alloc(8 + payload.length);
+  buf[0] = 0x01; buf[1] = type2;
+  buf.writeUInt16BE(payload.length, 2);
+  buf.writeUInt32BE(viscaSeq++, 4);
+  Buffer.from(payload).copy(buf, 8);
+  return buf;
+}
+
+function viscaSend(type2, payload) {
+  if (!viscaSocket) return;
+  const pkt = viscaPkt(type2, payload);
+  viscaSocket.send(pkt, VISCA_PORT, VISCA_HOST, err => {
+    if (err) console.error('[visca] send:', err.message);
+  });
+}
+
+function viscaInquire(payload) { viscaSend(0x10, payload); }
+function viscaCommand(payload) { viscaSend(0x00, payload); }
+
+function parseViscaRx(buf) {
+  // Strip 8-byte VISCA/IP header if present
+  const isHdr = buf.length > 8 && buf[0] === 0x02;
+  const data = isHdr ? buf.slice(8) : buf;
+  const hex = data.toString('hex').match(/../g).join(' ');
+  console.log('[visca] rx:', hex);
+  if (win) win.webContents.send('visca-raw', hex);
+
+  // Tracking state response: many Avkans cameras respond with 90 50 0p FF
+  // where p=2 means ON, p=3 means OFF for tracking inquiry 81 09 7E 01 04 FF
+  if (data.length >= 4 && data[0] === 0x90 && data[1] === 0x50) {
+    const val = data[2];
+    const tracking = val === 0x02;
+    if (tracking !== viscaTrackingEnabled) {
+      viscaTrackingEnabled = tracking;
+      console.log('[visca] tracking:', tracking ? 'ON' : 'OFF');
+      if (win) win.webContents.send('visca-tracking', tracking);
+    }
+  }
+}
+
+function initVisca() {
+  if (viscaSocket) return;
+  viscaSocket = dgram.createSocket('udp4');
+
+  viscaSocket.on('message', parseViscaRx);
+  viscaSocket.on('error', err => console.error('[visca]', err.message));
+
+  viscaSocket.bind(0, () => {
+    console.log('[visca] connected to', VISCA_HOST, ':', VISCA_PORT);
+    // Poll tracking state every 2 seconds
+    setInterval(() => viscaInquire([0x81, 0x09, 0x7E, 0x01, 0x04, 0xFF]), 2000);
+  });
+}
+
+ipcMain.on('visca-init',    () => initVisca());
+ipcMain.on('visca-command', (_, payload) => viscaCommand(payload));
+ipcMain.handle('visca-status', () => ({ tracking: viscaTrackingEnabled }));

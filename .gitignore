@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+google-credentials.json
+google-token.json
+clauderobot-desktop/
+renderer/models/*.bin

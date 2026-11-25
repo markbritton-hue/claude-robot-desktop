@@ -1,0 +1,58 @@
+{
+  "name": "clauderobot-desktop",
+  "version": "1.0.0",
+  "description": "Interactive 3D Claude robot desktop companion",
+  "author": "Mark Britton",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win",
+    "dist:dir": "electron-builder --win --dir"
+  },
+  "build": {
+    "appId": "com.clauderobot.desktop",
+    "productName": "Claude Robot",
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": ".env",
+        "to": ".env"
+      },
+      {
+        "from": "google-credentials.json",
+        "to": "google-credentials.json"
+      },
+      {
+        "from": "google-token.json",
+        "to": "google-token.json"
+      }
+    ]
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.36.3",
+    "dotenv": "^18.0.10",
+    "firebase": "^13.4.0",
+    "googleapis": "^190.0.0",
+    "imapflow": "^2.12.1",
+    "msedge-tts": "^2.1.1",
+    "three": "^0.170.0",
+    "whatwg-url": "^17.3.0"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^26.18.0"
+  }
+}

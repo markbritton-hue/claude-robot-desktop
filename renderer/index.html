@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Claude Robot</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: transparent;
+      overflow: hidden;
+      width: 300px;
+      height: 500px;
+      font-family: 'Segoe UI', sans-serif;
+      user-select: none;
+    }
+
+    #three-canvas {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 300px;
+      height: 300px;
+      pointer-events: none; /* let clicks pass through to overlay */
+      z-index: 10;
+    }
+
+    /* Click overlay — needs rgba(0,0,0,0.01) so Windows doesn't treat it as click-through */
+    #robot-click-area {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 300px;
+      height: 300px;
+      cursor: pointer;
+      z-index: 15;
+      background: rgba(0,0,0,0.01);
+    }
+
+    /* Wrench button — sits ON the robot, bottom-right */
+    #wrench-btn {
+      position: absolute;
+      bottom: 12px;
+      right: 12px;
+      background: rgba(20,20,28,0.85);
+      border: 1.5px solid rgba(255,255,255,0.2);
+      border-radius: 50%;
+      font-size: 15px;
+      width: 34px;
+      height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      z-index: 50;
+      transition: background 0.2s, border-color 0.2s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    }
+    #wrench-btn:hover { background: rgba(224,92,42,0.5); border-color: #e05c2a; }
+
+    #mute-btn {
+      position: absolute;
+      bottom: 12px;
+      right: 52px;
+      background: rgba(20,20,28,0.85);
+      border: 1.5px solid rgba(255,255,255,0.2);
+      border-radius: 50%;
+      font-size: 15px;
+      width: 34px;
+      height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      z-index: 50;
+      transition: background 0.2s, border-color 0.2s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    }
+    #mute-btn:hover { background: rgba(224,92,42,0.5); border-color: #e05c2a; }
+    #mute-btn.muted { background: rgba(224,92,42,0.3); border-color: #e05c2a; }
+
+    /* Settings popup — anchored from top so it never clips */
+    #settings-panel {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 210px;
+      max-height: 480px;
+      overflow-y: auto;
+      background: rgba(12,12,18,0.98);
+      border: 1px solid rgba(224,92,42,0.6);
+      border-radius: 12px;
+      padding: 14px;
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      z-index: 50;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+    }
+    #settings-panel.open { display: flex; }
+
+    .settings-title {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #e05c2a;
+    }
+
+    .setting-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .setting-row label {
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+    }
+    .setting-row select,
+    .setting-row input[type=range] {
+      width: 100%;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+      color: rgba(255,255,255,0.8);
+      font-size: 12px;
+      padding: 5px 8px;
+      outline: none;
+    }
+    .setting-row select:focus { border-color: #e05c2a; }
+    .setting-row input[type=range] {
+      padding: 4px 0;
+      accent-color: #e05c2a;
+    }
+
+    #close-settings {
+      position: absolute;
+      top: 8px; right: 10px;
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.3);
+      font-size: 14px;
+      cursor: pointer;
+    }
+    #close-settings:hover { color: rgba(255,255,255,0.7); }
+
+    /* Memory list */
+    #memory-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 100px;
+      overflow-y: auto;
+    }
+    .memory-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: rgba(255,255,255,0.75);
+      background: rgba(255,255,255,0.05);
+      border-radius: 5px;
+      padding: 4px 6px;
+    }
+    .memory-item span { flex: 1; }
+    .memory-del {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.3);
+      font-size: 11px;
+      cursor: pointer;
+      padding: 0 2px;
+      line-height: 1;
+    }
+    .memory-del:hover { color: #e05c2a; }
+    .memory-empty { font-size: 11px; color: rgba(255,255,255,0.3); line-height: 1.5; }
+    #reminder-list { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+    .reminder-item { display: flex; justify-content: space-between; align-items: flex-start; gap: 6px; font-size: 11px; color: rgba(255,255,255,0.75); }
+    .reminder-item .reminder-text { flex: 1; line-height: 1.4; }
+    .reminder-item .reminder-time { font-size: 10px; color: rgba(255,255,255,0.35); white-space: nowrap; }
+    .reminder-del { background: none; border: none; color: rgba(255,255,255,0.3); font-size: 12px; cursor: pointer; padding: 0 2px; line-height: 1; }
+    .reminder-del:hover { color: #e05c2a; }
+    .history-divider { text-align: center; font-size: 10px; color: rgba(255,255,255,0.25); margin: 4px 0 8px; }
+
+    #token-bag {
+      position: absolute;
+      bottom: 50px;
+      left: 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      z-index: 30;
+      pointer-events: all;
+      cursor: default;
+      transform-origin: bottom left;
+      transition: transform 0.2s ease;
+    }
+    #token-bag { transition: transform 0.15s ease; }
+    #token-bag-svg { filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6)); }
+    @keyframes bag-pulse-red { 0%,100% { filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6)); } 50% { filter: drop-shadow(0 0 10px rgba(255,0,0,0.9)) drop-shadow(0 2px 4px rgba(0,0,0,0.6)); } }
+    #token-bag-svg.bag-warn { animation: bag-pulse-red 1.4s ease-in-out infinite; }
+    #token-pct {
+      font-size: 9px; font-weight: 600;
+      color: #FFD700; font-family: 'Segoe UI', sans-serif;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+      opacity: 0; transition: opacity 0.15s ease;
+      position: absolute; bottom: 100%; left: 0;
+      margin-bottom: 3px;
+      white-space: nowrap;
+      background: rgba(0,0,0,0.6);
+      border-radius: 4px;
+      padding: 2px 5px;
+    }
+    #token-pct.visible { opacity: 1; }
+    #clear-memory-btn {
+      background: rgba(224,92,42,0.15);
+      border: 1px solid rgba(224,92,42,0.4);
+      border-radius: 5px;
+      color: #e05c2a;
+      font-size: 11px;
+      padding: 4px 8px;
+      cursor: pointer;
+      align-self: flex-start;
+    }
+    #clear-memory-btn:hover { background: rgba(224,92,42,0.3); }
+
+    #quit-btn {
+      background: rgba(180,30,30,0.2);
+      border: 1px solid rgba(220,60,60,0.5);
+      border-radius: 5px;
+      color: #ff6b6b;
+      font-size: 12px;
+      padding: 6px 12px;
+      cursor: pointer;
+      width: 100%;
+    }
+    #quit-btn:hover { background: rgba(220,60,60,0.4); border-color: #ff4444; }
+
+    /* Speech bubble — just above the robot's head */
+    #bubble {
+      position: absolute;
+      top: 220px;
+      left: 10px;
+      right: 10px;
+      background: rgba(20,20,28,0.95);
+      border: 2px solid #e05c2a;
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 13px;
+      color: rgba(255,255,255,0.92);
+      line-height: 1.5;
+      opacity: 0;
+      transform: translateY(6px) scale(0.95);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      pointer-events: none;
+      max-height: 110px;
+      overflow: hidden;
+      z-index: 30;
+    }
+    #bubble::after {
+      content: '';
+      position: absolute;
+      bottom: -11px;
+      left: 50%;
+      transform: translateX(-50%);
+      border-left: 8px solid transparent;
+      border-right: 8px solid transparent;
+      border-top: 11px solid #e05c2a;
+    }
+    #bubble.show { opacity: 1; transform: translateY(0) scale(1); }
+    #bubble.state-chat        { border-color: #4ade80; }
+    #bubble.state-chat::after { border-top-color: #4ade80; }
+    #bubble.state-thinking    { border-color: #8b5cf6; color: rgba(200,180,255,0.9); font-style: italic; }
+    #bubble.state-thinking::after { border-top-color: #8b5cf6; }
+
+    /* Chat panel */
+    #chat-panel {
+      position: absolute;
+      bottom: 195px;
+      left: 10px;
+      right: 10px;
+      background: rgba(12,12,18,0.97);
+      border: 1px solid rgba(224,92,42,0.5);
+      border-radius: 12px;
+      padding: 10px;
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 40;
+    }
+    #chat-panel.open { display: flex; }
+
+    #chat-log {
+      max-height: 110px;
+      overflow-y: auto;
+      font-size: 12px;
+      color: rgba(255,255,255,0.8);
+      line-height: 1.6;
+    }
+    #chat-log .you { color: #e05c2a; margin-bottom: 2px; }
+    #chat-log .bot { color: rgba(255,255,255,0.75); margin-bottom: 4px; }
+
+    #chat-input-row { display: flex; gap: 6px; }
+
+    #chat-input {
+      flex: 1;
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 6px;
+      color: #fff;
+      font-size: 12px;
+      padding: 6px 8px;
+      outline: none;
+    }
+    #chat-input:focus { border-color: #e05c2a; }
+
+    #chat-send {
+      background: #e05c2a;
+      border: none;
+      border-radius: 6px;
+      color: #000;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 6px 10px;
+      cursor: pointer;
+    }
+    #chat-send:hover { background: #f07040; }
+
+    #close-chat {
+      position: absolute;
+      top: 6px; right: 8px;
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.3);
+      font-size: 14px;
+      cursor: pointer;
+    }
+    #close-chat:hover { color: rgba(255,255,255,0.7); }
+
+    #mic-btn {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 6px;
+      color: rgba(255,255,255,0.6);
+      font-size: 15px;
+      padding: 6px 10px;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+    }
+    #mic-btn:hover { background: rgba(255,255,255,0.15); }
+    #mic-btn.listening {
+      background: rgba(224,92,42,0.3);
+      border-color: #e05c2a;
+      color: #e05c2a;
+      animation: mic-pulse 1s ease-in-out infinite;
+    }
+    @keyframes mic-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(224,92,42,0.4); }
+      50%       { box-shadow: 0 0 0 6px rgba(224,92,42,0); }
+    }
+  </style>
+</head>
+<body>
+  <!-- Robot canvas sits behind everything -->
+  <div id="three-canvas"></div>
+  <!-- Antenna drag handle — positioned over the antenna ball -->
+  <div id="antenna-drag" title="Drag to move" style="
+    position:absolute;
+    bottom:216px; left:128px;
+    width:44px; height:52px;
+    cursor:grab;
+    z-index:20;
+    pointer-events:all;
+    -webkit-app-region:drag;
+    background:transparent;
+  "></div>
+  <!-- Transparent overlay to catch robot clicks -->
+  <div id="robot-click-area"></div>
+
+  <!-- Token bag -->
+  <!-- Presence indicator dot — on the bag knot, sibling so it doesn't affect bag layout -->
+  <div id="presence-cam-dot" style="
+    display:none;
+    position:absolute;
+    bottom:124px; left:40px;
+    width:8px; height:8px;
+    border-radius:50%;
+    background:#555;
+    z-index:35;
+    pointer-events:none;
+    transition: background 0.4s ease, box-shadow 0.4s ease;
+  "></div>
+
+  <div id="token-bag">
+    <div id="token-pct">100%</div>
+    <svg id="token-bag-svg" viewBox="0 0 60 72" width="70" height="84" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <!-- Clip to bag body shape -->
+        <clipPath id="bag-clip">
+          <path d="M14,24 Q6,30 5,44 Q4,62 30,63 Q56,62 55,44 Q54,30 46,24 Z"/>
+        </clipPath>
+        <!-- Leather gradient -->
+        <linearGradient id="leather-grad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%"   stop-color="#8B5E3C"/>
+          <stop offset="50%"  stop-color="#6B3F22"/>
+          <stop offset="100%" stop-color="#4A2810"/>
+        </linearGradient>
+        <!-- Leather highlight -->
+        <linearGradient id="leather-hi" x1="0" y1="0" x2="0.6" y2="1">
+          <stop offset="0%"   stop-color="rgba(255,200,140,0.22)"/>
+          <stop offset="100%" stop-color="rgba(0,0,0,0)"/>
+        </linearGradient>
+        <!-- Coin gold gradient -->
+        <linearGradient id="coin-grad" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%"   stop-color="#7a5000"/>
+          <stop offset="35%"  stop-color="#FFD700"/>
+          <stop offset="65%"  stop-color="#FFC200"/>
+          <stop offset="100%" stop-color="#7a5000"/>
+        </linearGradient>
+        <!-- Warning leather gradient (red) -->
+        <linearGradient id="leather-warn" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%"   stop-color="#8B2222"/>
+          <stop offset="50%"  stop-color="#6B0000"/>
+          <stop offset="100%" stop-color="#3A0000"/>
+        </linearGradient>
+        <!-- Rope gradient -->
+        <linearGradient id="rope-grad" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%"   stop-color="#5C3A1E"/>
+          <stop offset="50%"  stop-color="#A0724A"/>
+          <stop offset="100%" stop-color="#5C3A1E"/>
+        </linearGradient>
+      </defs>
+
+      <!-- ── BAG BODY (background leather) ── -->
+      <path d="M14,24 Q6,30 5,44 Q4,62 30,63 Q56,62 55,44 Q54,30 46,24 Z"
+            fill="url(#leather-grad)" stroke="#2E1500" stroke-width="1.5"/>
+
+      <!-- ── COIN STACK (clipped to bag, rises from bottom) ── -->
+      <g clip-path="url(#bag-clip)" id="coin-stack">
+        <!-- 8 coin layers — JS shows/hides by moving the group up -->
+        <!-- Each coin = thick ellipse (face) + thin ellipse (edge highlight) -->
+        <g id="coin-fill" transform="translate(0,0)">
+          <!-- coin 1 (bottom) -->
+          <ellipse cx="30" cy="60" rx="18" ry="4.5" fill="#7a5000"/>
+          <ellipse cx="30" cy="58" rx="18" ry="4.5" fill="#c8900a"/>
+          <ellipse cx="30" cy="57" rx="18" ry="4" fill="url(#coin-grad)"/>
+          <ellipse cx="30" cy="56.5" rx="14" ry="2.5" fill="rgba(255,240,100,0.3)"/>
+          <!-- coin 2 -->
+          <ellipse cx="30" cy="54" rx="18" ry="4.5" fill="#7a5000"/>
+          <ellipse cx="30" cy="52" rx="18" ry="4.5" fill="#c8900a"/>
+          <ellipse cx="30" cy="51" rx="18" ry="4" fill="url(#coin-grad)"/>
+          <ellipse cx="30" cy="50.5" rx="14" ry="2.5" fill="rgba(255,240,100,0.3)"/>
+          <!-- coin 3 -->
+          <ellipse cx="30" cy="48" rx="18" ry="4.5" fill="#7a5000"/>
+          <ellipse cx="30" cy="46" rx="18" ry="4.5" fill="#c8900a"/>
+          <ellipse cx="30" cy="45" rx="18" ry="4" fill="url(#coin-grad)"/>
+          <ellipse cx="30" cy="44.5" rx="14" ry="2.5" fill="rgba(255,240,100,0.3)"/>
+          <!-- coin 4 -->
+          <ellipse cx="30" cy="42" rx="17" ry="4.5" fill="#7a5000"/>
+          <ellipse cx="30" cy="40" rx="17" ry="4.5" fill="#c8900a"/>
+          <ellipse cx="30" cy="39" rx="17" ry="4" fill="url(#coin-grad)"/>
+          <ellipse cx="30" cy="38.5" rx="13" ry="2.5" fill="rgba(255,240,100,0.3)"/>
+          <!-- coin 5 -->
+          <ellipse cx="30" cy="36" rx="16" ry="4.5" fill="#7a5000"/>
+          <ellipse cx="30" cy="34" rx="16" ry="4.5" fill="#c8900a"/>
+          <ellipse cx="30" cy="33" rx="16" ry="4" fill="url(#coin-grad)"/>
+          <ellipse cx="30" cy="32.5" rx="12" ry="2.5" fill="rgba(255,240,100,0.3)"/>
+          <!-- coin 6 -->
+          <ellipse cx="30" cy="30" rx="15" ry="4.5" fill="#7a5000"/>
+          <ellipse cx="30" cy="28" rx="15" ry="4.5" fill="#c8900a"/>
+          <ellipse cx="30" cy="27" rx="15" ry="4" fill="url(#coin-grad)"/>
+          <ellipse cx="30" cy="26.5" rx="11" ry="2.5" fill="rgba(255,240,100,0.3)"/>
+          <!-- coin 7 -->
+          <ellipse cx="30" cy="24" rx="13" ry="4" fill="#7a5000"/>
+          <ellipse cx="30" cy="22" rx="13" ry="4" fill="#c8900a"/>
+          <ellipse cx="30" cy="21" rx="13" ry="3.5" fill="url(#coin-grad)"/>
+          <ellipse cx="30" cy="20.5" rx="9" ry="2" fill="rgba(255,240,100,0.3)"/>
+          <!-- coin 8 (top) -->
+          <ellipse cx="30" cy="18" rx="11" ry="3.5" fill="#7a5000"/>
+          <ellipse cx="30" cy="16" rx="11" ry="3.5" fill="#c8900a"/>
+          <ellipse cx="30" cy="15" rx="11" ry="3" fill="url(#coin-grad)"/>
+          <ellipse cx="30" cy="14.5" rx="7" ry="1.8" fill="rgba(255,240,100,0.3)"/>
+        </g>
+      </g>
+
+      <!-- ── CONTEXT ARC — orange ring, fills as context window compresses ── -->
+      <path id="context-arc"
+            d="M14,24 Q6,30 5,44 Q4,62 30,63 Q56,62 55,44 Q54,30 46,24 Z"
+            fill="none" stroke="#FF6B1A" stroke-width="3"
+            stroke-linecap="round" stroke-linejoin="round"
+            style="filter: drop-shadow(0 0 4px #FF6B1A);"
+            stroke-dasharray="1 9999" stroke-dashoffset="0"/>
+
+      <!-- ── LEATHER STITCH LINES ── -->
+      <path d="M14,24 Q6,30 5,44 Q4,62 30,63 Q56,62 55,44 Q54,30 46,24 Z"
+            fill="none" stroke="#3D2000" stroke-width="1.5"
+            stroke-dasharray="3,2.5" opacity="0.6"/>
+      <path d="M30,25 Q30,44 30,62" stroke="#3D2000" stroke-width="0.7" stroke-dasharray="2,3" opacity="0.25" fill="none"/>
+
+      <!-- ── LEATHER HIGHLIGHT ── -->
+      <path d="M14,24 Q6,30 5,44 Q4,62 30,63 Q56,62 55,44 Q54,30 46,24 Z"
+            fill="url(#leather-hi)"/>
+
+      <!-- ── NECK / GATHER ── -->
+      <path d="M15,24 Q18,16 30,14 Q42,16 45,24"
+            fill="#5C3010" stroke="#2E1500" stroke-width="1.2"/>
+      <path d="M15,24 Q18,19 30,18 Q42,19 45,24"
+            fill="#7A4020" stroke="#2E1500" stroke-width="0.8"/>
+
+      <!-- ── ROPE TIE ── -->
+      <ellipse cx="30" cy="13" rx="7" ry="4" fill="url(#rope-grad)" stroke="#2E1500" stroke-width="1"/>
+      <path d="M23,13 Q16,6 20,4 Q24,2 26,8" fill="none" stroke="url(#rope-grad)" stroke-width="2.5" stroke-linecap="round"/>
+      <path d="M37,13 Q44,6 40,4 Q36,2 34,8" fill="none" stroke="url(#rope-grad)" stroke-width="2.5" stroke-linecap="round"/>
+      <ellipse cx="30" cy="13" rx="4" ry="2.5" fill="#A0724A" stroke="#2E1500" stroke-width="0.7"/>
+    </svg>
+  </div>
+
+  <div id="bubble"></div>
+
+  <div id="chat-panel">
+    <button id="close-chat">✕</button>
+    <div id="chat-log"></div>
+    <div id="chat-input-row">
+      <button id="mic-btn" title="Click to speak">🎤</button>
+      <input id="chat-input" type="text" placeholder="Say something…" autocomplete="off">
+      <button id="chat-send">Send</button>
+    </div>
+  </div>
+
+  <!-- Mute button -->
+  <button id="mute-btn" title="Mute/Unmute">🔊</button>
+
+  <!-- Wrench settings button -->
+  <button id="wrench-btn" title="Settings">🔧</button>
+
+  <!-- Settings popup -->
+  <div id="settings-panel">
+    <button id="close-settings">✕</button>
+    <div class="settings-title">Settings</div>
+    <div class="setting-row">
+      <label>Voice</label>
+      <select id="voice-select"></select>
+    </div>
+    <div class="setting-row">
+      <label>Speed — <span id="rate-val">1.0</span>x</label>
+      <input type="range" id="rate-slider" min="0.5" max="2.0" step="0.1" value="1.0">
+    </div>
+    <div class="setting-row">
+      <label>Pitch — <span id="pitch-val">1.0</span></label>
+      <input type="range" id="pitch-slider" min="0.5" max="2.0" step="0.1" value="1.0">
+    </div>
+    <div class="setting-row">
+      <label>Daily Token Budget — <span id="budget-val">50000</span></label>
+      <input type="range" id="budget-slider" min="50000" max="2000000" step="50000" value="500000">
+      <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:2px;">Used today: <span id="tokens-used">0</span></div>
+    </div>
+    <div class="setting-row">
+      <label>Presence Lock</label>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:rgba(255,255,255,0.75);">
+        <input type="checkbox" id="presence-toggle" style="accent-color:#e05c2a;cursor:pointer;"> Auto-lock when away
+      </label>
+      <div id="presence-status" style="display:none;align-items:center;gap:6px;margin-top:4px;">
+        <span id="presence-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#555;flex-shrink:0;"></span>
+        <span id="presence-status-text" style="font-size:10px;color:rgba(255,255,255,0.4);">waiting...</span>
+      </div>
+    </div>
+    <div class="setting-row" id="presence-camera-row">
+      <label>Camera</label>
+      <select id="presence-camera-select"></select>
+    </div>
+    <div class="setting-row" id="presence-timeout-row">
+      <label>Lock after — <span id="presence-sec-val">2m</span></label>
+      <input type="range" id="presence-slider" min="5" max="300" step="5" value="120">
+      <div style="font-size:10px;color:rgba(255,255,255,0.3);">5 sec – 5 min</div>
+    </div>
+    <div class="setting-row">
+      <label>Reminders — <span id="reminder-count">0</span> pending</label>
+      <div id="reminder-list"></div>
+    </div>
+    <div class="setting-row">
+      <label>Memory — <span id="memory-count">0</span> fact<span id="memory-count-s">s</span> stored</label>
+      <div id="memory-list"></div>
+      <button id="clear-memory-btn">Clear all</button>
+    </div>
+    <div class="setting-row">
+      <button id="quit-btn">⏻ Quit Robot</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.14/dist/face-api.js"></script>
+  <script type="module" src="robot.js"></script>
+  <script src="chat.js"></script>
+</body>
+</html>
