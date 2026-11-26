@@ -198,19 +198,21 @@
     }
     #token-bag { transition: transform 0.15s ease; }
     #token-bag-svg { filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6)); }
+    @keyframes bag-pulse-red { 0%,100% { filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6)); } 50% { filter: drop-shadow(0 0 10px rgba(255,0,0,0.9)) drop-shadow(0 2px 4px rgba(0,0,0,0.6)); } }
+    #token-bag-svg.bag-warn { animation: bag-pulse-red 1.4s ease-in-out infinite; }
     #token-pct {
-      font-size: 11px; font-weight: 600;
+      font-size: 9px; font-weight: 600;
       color: #FFD700; font-family: 'Segoe UI', sans-serif;
-      text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+      text-shadow: 0 1px 3px rgba(0,0,0,0.9);
       opacity: 0; transition: opacity 0.15s ease;
       position: absolute; bottom: 100%; left: 0;
-      margin-bottom: 4px;
+      margin-bottom: 3px;
       white-space: nowrap;
       background: rgba(0,0,0,0.6);
-      border-radius: 6px;
-      padding: 3px 7px;
+      border-radius: 4px;
+      padding: 2px 5px;
     }
-    #token-bag:hover #token-pct { opacity: 1; }
+    #token-pct.visible { opacity: 1; }
     #clear-memory-btn {
       background: rgba(224,92,42,0.15);
       border: 1px solid rgba(224,92,42,0.4);
@@ -362,10 +364,33 @@
 <body>
   <!-- Robot canvas sits behind everything -->
   <div id="three-canvas"></div>
+  <!-- Antenna drag handle — positioned over the antenna ball -->
+  <div id="antenna-drag" title="Drag to move" style="
+    position:absolute;
+    bottom:216px; left:128px;
+    width:44px; height:52px;
+    cursor:grab;
+    z-index:20;
+    pointer-events:all;
+    background:transparent;
+  "></div>
   <!-- Transparent overlay to catch robot clicks -->
   <div id="robot-click-area"></div>
 
   <!-- Token bag -->
+  <!-- Presence indicator dot — on the bag knot, sibling so it doesn't affect bag layout -->
+  <div id="presence-cam-dot" style="
+    display:none;
+    position:absolute;
+    bottom:124px; left:40px;
+    width:8px; height:8px;
+    border-radius:50%;
+    background:#555;
+    z-index:35;
+    pointer-events:none;
+    transition: background 0.4s ease, box-shadow 0.4s ease;
+  "></div>
+
   <div id="token-bag">
     <div id="token-pct">100%</div>
     <svg id="token-bag-svg" viewBox="0 0 60 72" width="70" height="84" xmlns="http://www.w3.org/2000/svg">
@@ -392,6 +417,12 @@
           <stop offset="65%"  stop-color="#FFC200"/>
           <stop offset="100%" stop-color="#7a5000"/>
         </linearGradient>
+        <!-- Warning leather gradient (red) -->
+        <linearGradient id="leather-warn" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%"   stop-color="#8B2222"/>
+          <stop offset="50%"  stop-color="#6B0000"/>
+          <stop offset="100%" stop-color="#3A0000"/>
+        </linearGradient>
         <!-- Rope gradient -->
         <linearGradient id="rope-grad" x1="0" y1="0" x2="1" y2="0">
           <stop offset="0%"   stop-color="#5C3A1E"/>
@@ -408,7 +439,7 @@
       <g clip-path="url(#bag-clip)" id="coin-stack">
         <!-- 8 coin layers — JS shows/hides by moving the group up -->
         <!-- Each coin = thick ellipse (face) + thin ellipse (edge highlight) -->
-        <g id="coin-fill" transform="translate(0,48)">
+        <g id="coin-fill" transform="translate(0,0)">
           <!-- coin 1 (bottom) -->
           <ellipse cx="30" cy="60" rx="18" ry="4.5" fill="#7a5000"/>
           <ellipse cx="30" cy="58" rx="18" ry="4.5" fill="#c8900a"/>
@@ -524,6 +555,25 @@
       <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:2px;">Used today: <span id="tokens-used">0</span></div>
     </div>
     <div class="setting-row">
+      <label>Presence Lock</label>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:rgba(255,255,255,0.75);">
+        <input type="checkbox" id="presence-toggle" style="accent-color:#e05c2a;cursor:pointer;"> Auto-lock when away
+      </label>
+      <div id="presence-status" style="display:none;align-items:center;gap:6px;margin-top:4px;">
+        <span id="presence-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#555;flex-shrink:0;"></span>
+        <span id="presence-status-text" style="font-size:10px;color:rgba(255,255,255,0.4);">waiting...</span>
+      </div>
+    </div>
+    <div class="setting-row" id="presence-camera-row">
+      <label>Camera</label>
+      <select id="presence-camera-select"></select>
+    </div>
+    <div class="setting-row" id="presence-timeout-row">
+      <label>Lock after — <span id="presence-sec-val">2m</span></label>
+      <input type="range" id="presence-slider" min="5" max="300" step="5" value="120">
+      <div style="font-size:10px;color:rgba(255,255,255,0.3);">5 sec – 5 min</div>
+    </div>
+    <div class="setting-row">
       <label>Reminders — <span id="reminder-count">0</span> pending</label>
       <div id="reminder-list"></div>
     </div>
@@ -537,6 +587,7 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.14/dist/face-api.js"></script>
   <script type="module" src="robot.js"></script>
   <script src="chat.js"></script>
 </body>

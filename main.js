@@ -1,8 +1,12 @@
-require('dotenv').config();
-const { app, BrowserWindow, ipcMain, screen, Notification } = require('electron');
 const path = require('path');
-const { exec } = require('child_process');
 const fs = require('fs');
+// When packaged, .env lives in resourcesPath; in dev it's next to main.js
+const _envFile = path.join(process.resourcesPath || '', '.env');
+require('dotenv').config({ path: fs.existsSync(_envFile) ? _envFile : path.join(__dirname, '.env') });
+const { app, BrowserWindow, ipcMain, screen, Notification } = require('electron');
+// Force DirectShow camera path — avoids MF hardware MFT error (0xC00D3704) in Electron on Windows
+app.commandLine.appendSwitch('disable-features', 'MediaFoundationVideoCapture');
+const { exec } = require('child_process');
 const os = require('os');
 const https = require('https');
 const Anthropic = require('@anthropic-ai/sdk');
@@ -46,7 +50,7 @@ function projectNameFromPath(filePath) {
   return segments[segments.length - 1] || null;
 }
 
-function getLatestAssistantBlock(filePath) {
+function getLatestAssistantBlock(filePath, trackTokens = false) {
   try {
     const lines = fs.readFileSync(filePath, 'utf8').trim().split('\n');
     let fileTotalTokens = 0;
@@ -63,8 +67,8 @@ function getLatestAssistantBlock(filePath) {
             const ctxPct = Math.min(100, Math.round((totalCtx / 200000) * 100));
             win.webContents.send('context-update', ctxPct);
           }
-          // Accumulate output tokens across all turns for total session usage
-          fileTotalTokens += (u.output_tokens || 0) + (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+          // Count only output + cache_creation; input is cached context re-sent every turn and inflates the total
+          fileTotalTokens += (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0);
         }
         if (!result) {
           const blocks = obj.message.content;
@@ -79,8 +83,16 @@ function getLatestAssistantBlock(filePath) {
       } catch {}
     }
     if (fileTotalTokens > 0) {
-      sessionTokens = fileTotalTokens;
-      broadcastTokens();
+      if (trackTokens) {
+        // Only count tokens added since app start (delta from baseline)
+        const baseline = fileTokenBaseline[filePath] || 0;
+        const delta = Math.max(0, fileTotalTokens - baseline);
+        if (delta > 0) { sessionTokens += delta; broadcastTokens(); }
+        fileTokenBaseline[filePath] = fileTotalTokens;
+      } else {
+        // Initial scan: record baseline, don't add to session budget
+        fileTokenBaseline[filePath] = fileTotalTokens;
+      }
     }
     return result;
   } catch {}
@@ -90,7 +102,7 @@ function getLatestAssistantBlock(filePath) {
 function onTranscriptChange(filePath) {
   if (debounceTimers[filePath]) clearTimeout(debounceTimers[filePath]);
   debounceTimers[filePath] = setTimeout(() => {
-    const block = getLatestAssistantBlock(filePath);
+    const block = getLatestAssistantBlock(filePath, true);
     if (!block || !win) return;
     const project = projectNameFromPath(filePath);
 
@@ -107,6 +119,26 @@ function onTranscriptChange(filePath) {
       }
     }
   }, 300);
+}
+
+function scanExistingTranscripts() {
+  // Find all .jsonl files modified in the last 24h and do an initial read
+  try {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const projects = fs.readdirSync(CLAUDE_PROJECTS);
+    let newestFile = null, newestMtime = 0;
+    for (const proj of projects) {
+      const dir = path.join(CLAUDE_PROJECTS, proj);
+      if (!fs.statSync(dir).isDirectory()) continue;
+      for (const f of fs.readdirSync(dir)) {
+        if (!f.endsWith('.jsonl')) continue;
+        const fp = path.join(dir, f);
+        const mtime = fs.statSync(fp).mtimeMs;
+        if (mtime > cutoff && mtime > newestMtime) { newestMtime = mtime; newestFile = fp; }
+      }
+    }
+    if (newestFile) getLatestAssistantBlock(newestFile);
+  } catch {}
 }
 
 function watchStatus() {
@@ -279,7 +311,10 @@ async function saveMessage(msg) {
 let sessionBudget = 500000;
 let weeklyBudget  = 2000000;
 let sessionTokens = 0; // tracked live from JSONL, not persisted
+const fileTokenBaseline = {}; // tokens per file at app start, for delta tracking
 let weeklyUsage   = { week: '', used: 0 };
+let robotSessionOutput = 0; // output tokens from robot's own API calls this run
+let robotContextPct = 0;    // context window % from robot's latest API call
 
 function getWeekKey() {
   const d = new Date();
@@ -310,12 +345,14 @@ function broadcastTokens() {
   if (win) win.webContents.send('token-update', {
     sessionUsed: sessionTokens, sessionBudget,
     weeklyUsed: weeklyUsage.used, weeklyBudget,
+    robotSessionOutput, robotContextPct,
   });
 }
 
 ipcMain.handle('get-tokens', () => ({
   sessionUsed: sessionTokens, sessionBudget,
   weeklyUsed: weeklyUsage.used, weeklyBudget,
+  robotSessionOutput, robotContextPct,
 }));
 
 ipcMain.handle('set-token-budget', async (_, { session, weekly }) => {
@@ -338,6 +375,9 @@ ipcMain.handle('chat-message', async (_, userMsg) => {
   });
   const reply = res.content[0].text;
   const tokensUsed = (res.usage?.input_tokens || 0) + (res.usage?.output_tokens || 0);
+  robotSessionOutput += (res.usage?.output_tokens || 0);
+  robotContextPct = Math.min(100, Math.round(((res.usage?.input_tokens || 0) / 200000) * 100));
+  broadcastTokens();
   await addTokens(tokensUsed);
   history.push({ role: 'assistant', content: reply });
   await saveMessage({ role: 'assistant', content: reply });
@@ -402,8 +442,11 @@ ipcMain.handle('start-listening', () => {
 });
 
 // --- Google Calendar ---
-const GCREDS_PATH = path.join(__dirname, 'google-credentials.json');
-const GTOKEN_PATH = path.join(__dirname, 'google-token.json');
+const _resPath = process.resourcesPath || __dirname;
+const GCREDS_PATH = fs.existsSync(path.join(_resPath, 'google-credentials.json'))
+  ? path.join(_resPath, 'google-credentials.json') : path.join(__dirname, 'google-credentials.json');
+const GTOKEN_PATH = fs.existsSync(path.join(_resPath, 'google-token.json'))
+  ? path.join(_resPath, 'google-token.json') : path.join(__dirname, 'google-token.json');
 let calendarAuth = null;
 
 async function getCalendarAuth() {
@@ -493,6 +536,8 @@ function createWindow() {
     // Push history and reminders to renderer now that they're loaded
     win.webContents.send('init-data', { history, reminders });
     watchStatus();
+    // Delay initial scan so renderer has time to register its IPC listeners
+    setTimeout(scanExistingTranscripts, 2000);
     fetchWeather();
     setInterval(checkReminders, 30000);
     setInterval(fetchWeather, 30 * 60 * 1000);
@@ -519,3 +564,72 @@ ipcMain.on('set-ignore-mouse', (_, ignore) => {
 
 ipcMain.on('quit-app', () => app.quit());
 ipcMain.on('move-window', (_, { x, y }) => win && win.setPosition(Math.round(x), Math.round(y)));
+ipcMain.on('lock-workstation', () => { exec('rundll32.exe user32.dll,LockWorkStation'); });
+
+// --- VISCA over IP (Avkans PTZ camera) ---
+const dgram = require('dgram');
+const VISCA_HOST = '192.168.0.207';
+const VISCA_PORT = 52381;
+let viscaSocket = null;
+let viscaSeq = 1;
+let viscaTrackingEnabled = null; // null = unknown
+
+function viscaPkt(type2, payload) {
+  // VISCA over IP header: [0x01, type2, payloadLen(2), seqNum(4)] + payload
+  const buf = Buffer.alloc(8 + payload.length);
+  buf[0] = 0x01; buf[1] = type2;
+  buf.writeUInt16BE(payload.length, 2);
+  buf.writeUInt32BE(viscaSeq++, 4);
+  Buffer.from(payload).copy(buf, 8);
+  return buf;
+}
+
+function viscaSend(type2, payload) {
+  if (!viscaSocket) return;
+  const pkt = viscaPkt(type2, payload);
+  viscaSocket.send(pkt, VISCA_PORT, VISCA_HOST, err => {
+    if (err) console.error('[visca] send:', err.message);
+  });
+}
+
+function viscaInquire(payload) { viscaSend(0x10, payload); }
+function viscaCommand(payload) { viscaSend(0x00, payload); }
+
+function parseViscaRx(buf) {
+  // Strip 8-byte VISCA/IP header if present
+  const isHdr = buf.length > 8 && buf[0] === 0x02;
+  const data = isHdr ? buf.slice(8) : buf;
+  const hex = data.toString('hex').match(/../g).join(' ');
+  console.log('[visca] rx:', hex);
+  if (win) win.webContents.send('visca-raw', hex);
+
+  // Tracking state response: many Avkans cameras respond with 90 50 0p FF
+  // where p=2 means ON, p=3 means OFF for tracking inquiry 81 09 7E 01 04 FF
+  if (data.length >= 4 && data[0] === 0x90 && data[1] === 0x50) {
+    const val = data[2];
+    const tracking = val === 0x02;
+    if (tracking !== viscaTrackingEnabled) {
+      viscaTrackingEnabled = tracking;
+      console.log('[visca] tracking:', tracking ? 'ON' : 'OFF');
+      if (win) win.webContents.send('visca-tracking', tracking);
+    }
+  }
+}
+
+function initVisca() {
+  if (viscaSocket) return;
+  viscaSocket = dgram.createSocket('udp4');
+
+  viscaSocket.on('message', parseViscaRx);
+  viscaSocket.on('error', err => console.error('[visca]', err.message));
+
+  viscaSocket.bind(0, () => {
+    console.log('[visca] connected to', VISCA_HOST, ':', VISCA_PORT);
+    // Poll tracking state every 2 seconds
+    setInterval(() => viscaInquire([0x81, 0x09, 0x7E, 0x01, 0x04, 0xFF]), 2000);
+  });
+}
+
+ipcMain.on('visca-init',    () => initVisca());
+ipcMain.on('visca-command', (_, payload) => viscaCommand(payload));
+ipcMain.handle('visca-status', () => ({ tracking: viscaTrackingEnabled }));

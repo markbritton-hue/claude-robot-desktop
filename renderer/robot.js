@@ -117,21 +117,9 @@ document.addEventListener('mousemove', e => {
   mouse.y = -(e.clientY - EYE_Y) / TRACK_RADIUS;
 });
 
-// --- Drag to reposition ---
-let dragging = false, dragOffX = 0, dragOffY = 0;
-wrap.addEventListener('mousedown', e => {
-  dragging = true;
-  dragOffX = e.screenX - window.screenX;
-  dragOffY = e.screenY - window.screenY;
-  if (window.electron) window.electron.setIgnoreMouse(false);
-});
-document.addEventListener('mousemove', e => {
-  if (!dragging) return;
-  const nx = e.screenX - dragOffX;
-  const ny = e.screenY - dragOffY;
-  if (window.electron) window.electron.moveWindow(nx, ny);
-});
-document.addEventListener('mouseup', () => { dragging = false; });
+// --- Antenna hover glow ---
+let antennaHovered = false;
+document.addEventListener('antenna-hover', e => { antennaHovered = e.detail; });
 
 // --- Blink ---
 let blinkScale = 1, blinking = false;
@@ -222,9 +210,12 @@ function animate() {
   // Notify bag to follow — convert Three.js units to pixels (approx 40px per unit at this camera)
   document.dispatchEvent(new CustomEvent('robot-bob', { detail: Math.round(bobY * -40) }));
 
-  // Antenna pulse — frantic when working
+  // Antenna pulse — frantic when working, bright when hovered for drag
   const antennaSpeed = mood === 'working' ? 6 : mood === 'thinking' ? 4 : 2.5;
-  antennaBall.material.emissiveIntensity = 0.5 + Math.sin(t * antennaSpeed) * 0.4;
+  const antennaBase  = antennaHovered ? 1.4 : 0.5;
+  antennaBall.material.emissiveIntensity = antennaBase + Math.sin(t * antennaSpeed) * 0.4;
+  antennaStem.material.emissive = antennaHovered ? new THREE.Color(0xffffff) : new THREE.Color(0x000000);
+  antennaStem.material.emissiveIntensity = antennaHovered ? 0.3 : 0;
 
   // Scanline
   scanline.position.y = -0.9*S + Math.sin(t * 1.8) * 0.3*S;

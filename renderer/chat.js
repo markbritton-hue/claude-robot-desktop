@@ -2,6 +2,35 @@
 function setMood(m) { document.dispatchEvent(new CustomEvent('set-mood', { detail: m })); }
 function setClaudeState(s) { document.dispatchEvent(new CustomEvent('set-claude-state', { detail: s })); }
 
+// --- Antenna drag (moves the window) ---
+const antennaDrag = document.getElementById('antenna-drag');
+let winDragging = false, winDragOffX = 0, winDragOffY = 0;
+
+antennaDrag.addEventListener('mouseenter', () => {
+  document.dispatchEvent(new CustomEvent('antenna-hover', { detail: true }));
+});
+antennaDrag.addEventListener('mouseleave', () => {
+  if (!winDragging) document.dispatchEvent(new CustomEvent('antenna-hover', { detail: false }));
+});
+antennaDrag.addEventListener('mousedown', e => {
+  winDragging = true;
+  winDragOffX = e.screenX - window.screenX;
+  winDragOffY = e.screenY - window.screenY;
+  antennaDrag.style.cursor = 'grabbing';
+  e.preventDefault();
+  e.stopPropagation();
+});
+document.addEventListener('mousemove', e => {
+  if (!winDragging) return;
+  window.electron.moveWindow(e.screenX - winDragOffX, e.screenY - winDragOffY);
+});
+document.addEventListener('mouseup', () => {
+  if (!winDragging) return;
+  winDragging = false;
+  antennaDrag.style.cursor = 'grab';
+  document.dispatchEvent(new CustomEvent('antenna-hover', { detail: false }));
+});
+
 const panel        = document.getElementById('chat-panel');
 const log          = document.getElementById('chat-log');
 const input        = document.getElementById('chat-input');
@@ -51,30 +80,95 @@ function setArc(el, pct, fullColor, lowColor) {
   el.setAttribute('stroke', pct > 50 ? fullColor : pct > 20 ? '#facc15' : lowColor);
 }
 
+const alertedLow = { context: false, context20: false, session: false, session20: false };
+let sessionPctRemaining = 100;
+
+let robotOutputTotal = 0;
+let _sessionUsed = 0, _sessionBudget = 500000;
+function updateBagLabel() {
+  if (!tokenPct) return;
+  const remaining = Math.max(0, _sessionBudget - _sessionUsed);
+  const remK = remaining >= 1000 ? `${Math.round(remaining / 1000)}k` : remaining;
+  tokenPct.textContent = `${remK} tokens left · ${ctxPctCurrent}% ctx`;
+}
+
+const bagSvgEl = document.getElementById('token-bag-svg');
+const bagBodyEl = bagSvgEl ? bagSvgEl.querySelector('path') : null;
+
+function setBagWarn(on) {
+  if (!bagSvgEl || !bagBodyEl) return;
+  if (on) {
+    bagSvgEl.classList.add('bag-warn');
+    bagBodyEl.setAttribute('fill', 'url(#leather-warn)');
+  } else {
+    bagSvgEl.classList.remove('bag-warn');
+    bagBodyEl.setAttribute('fill', 'url(#leather-grad)');
+  }
+}
+
+function checkLowAlerts(contextRemaining, sessionRemaining) {
+  if (contextRemaining !== null && contextRemaining <= 20 && !alertedLow.context20) {
+    alertedLow.context20 = true;
+    setBagWarn(true);
+    const msg = `Heads up — context window is getting full, only ${contextRemaining}% remaining.`;
+    showBubble(msg, 'state-alert');
+  }
+  if (contextRemaining !== null && contextRemaining <= 10 && !alertedLow.context) {
+    alertedLow.context = true;
+    const msg = `Warning Mark, your Claude context window is almost full — only ${contextRemaining}% remaining.`;
+    showBubble(msg, 'state-alert');
+    speak(msg);
+  }
+  if (sessionRemaining !== null && sessionRemaining <= 20 && !alertedLow.session20) {
+    alertedLow.session20 = true;
+    setBagWarn(true);
+    const msg = `Heads up — session token budget is at ${sessionRemaining}% remaining.`;
+    showBubble(msg, 'state-alert');
+  }
+  if (sessionRemaining !== null && sessionRemaining <= 10 && !alertedLow.session) {
+    alertedLow.session = true;
+    const msg = `Warning Mark, your session token budget is running low — only ${sessionRemaining}% remaining.`;
+    showBubble(msg, 'state-alert');
+    speak(msg);
+  }
+}
+
+function updateCoinFill() {
+  // Coins = context window remaining (inverse of arc)
+  const remaining = 100 - ctxPctCurrent;
+  const coinFill = document.getElementById('coin-fill');
+  if (coinFill) coinFill.setAttribute('transform', `translate(0,${Math.round(48 * (1 - remaining / 100))})`);
+}
+
+let contextInitialized = false;
 function updateContextArc(pct) {
   ctxPctCurrent = pct;
   setArc(ctxArc, pct, '#FF6B1A', '#ff2200');
-  // Coins = session remaining (inverse of context used)
-  const remaining = 100 - pct;
-  const coinFill = document.getElementById('coin-fill');
-  if (coinFill) coinFill.setAttribute('transform', `translate(0,${Math.round(48 * (1 - remaining / 100))})`);
-  if (tokenPct) tokenPct.textContent = `${remaining}% session · ${pct}% context`;
+  updateCoinFill();
+  updateBagLabel();
+  // Skip alert check on the very first update (reflects prior session state)
+  if (contextInitialized) checkLowAlerts(100 - pct, null);
+  contextInitialized = true;
 }
 window.electron.onContextUpdate(updateContextArc);
 let bagHovered = false;
 
-function updateTokenBag({ sessionUsed, sessionBudget, weeklyUsed, weeklyBudget }) {
+function updateTokenBag({ sessionUsed, sessionBudget, weeklyUsed, weeklyBudget, robotSessionOutput: rso, robotContextPct: rcp }) {
   const sPct = Math.max(0, Math.min(100, Math.round((1 - sessionUsed / sessionBudget) * 100)));
-  const wPct = Math.max(0, Math.min(100, Math.round((1 - weeklyUsed  / weeklyBudget)  * 100)));
-  tokensUsedEl.textContent = (sessionUsed || 0).toLocaleString();
-
+  sessionPctRemaining = sPct;
+  _sessionUsed = sessionUsed || 0;
+  _sessionBudget = sessionBudget || 500000;
+  if (rso != null) robotOutputTotal = rso;
+  tokensUsedEl.textContent = (_sessionUsed).toLocaleString();
   budgetSlider.value = sessionBudget;
   budgetVal.textContent = sessionBudget.toLocaleString();
-  tokensUsedEl.textContent = (sessionUsed || 0).toLocaleString();
+  updateBagLabel();
+  checkLowAlerts(null, sPct);
 }
 
 window.electron.getTokens().then(updateTokenBag);
 window.electron.onTokenUpdate(updateTokenBag);
+updateCoinFill(); // initialize to full bag at startup
 
 const tokenBagEl = document.getElementById('token-bag');
 
@@ -90,8 +184,8 @@ document.addEventListener('robot-bob', e => {
   currentBobY = e.detail;
   applyBagTransform();
 });
-tokenBagEl.addEventListener('mouseenter', () => { bagHovered = true;  applyBagTransform(); });
-tokenBagEl.addEventListener('mouseleave', () => { bagHovered = false; applyBagTransform(); });
+tokenBagEl.addEventListener('mouseenter', () => { bagHovered = true;  applyBagTransform(); tokenPct.classList.add('visible'); });
+tokenBagEl.addEventListener('mouseleave', () => { bagHovered = false; applyBagTransform(); tokenPct.classList.remove('visible'); });
 
 budgetSlider.addEventListener('input', () => {
   budgetVal.textContent = parseInt(budgetSlider.value).toLocaleString();
@@ -150,6 +244,7 @@ wrenchBtn.addEventListener('click', async e => {
   settingsPanel.classList.toggle('open');
   if (settingsPanel.classList.contains('open')) {
     refreshMemoryList();
+    populateCameras();
     const reminders = await window.electron.getReminders();
     refreshReminderList(reminders);
   }
@@ -506,10 +601,255 @@ setInterval(checkProactive, 60000); // check every minute
 // Startup greeting after 3 seconds
 setTimeout(() => {
   const h = new Date().getHours();
-  const greeting = h < 12 ? 'Good morning!' : h < 17 ? 'Good afternoon!' : 'Good evening!';
+  const greeting = h < 12 ? 'Good morning, Mark!' : h < 17 ? 'Good afternoon, Mark!' : 'Good evening, Mark!';
   showBubble(`${greeting} I'm here if you need me.`, 'state-chat');
   speak(`${greeting} I'm here if you need me.`);
 }, 3000);
+
+// --- Presence Detection ---
+const PRESENCE_DEFAULTS = { enabled: false, timeoutSec: 120 };
+
+function loadPresenceSettings() {
+  try { return { ...PRESENCE_DEFAULTS, ...JSON.parse(localStorage.getItem('presenceSettings') || '{}') }; }
+  catch { return { ...PRESENCE_DEFAULTS }; }
+}
+function savePresenceSettings(s) { localStorage.setItem('presenceSettings', JSON.stringify(s)); }
+
+let presenceSettings = loadPresenceSettings();
+let presenceStream = null;
+let presenceVideo = null;
+let lastFaceSeen = Date.now();
+let presenceInterval = null;
+let faceApiReady = false;
+
+const presenceToggle     = document.getElementById('presence-toggle');
+const presenceSlider     = document.getElementById('presence-slider');
+const presenceSecVal     = document.getElementById('presence-sec-val');
+const presenceCamSel     = document.getElementById('presence-camera-select');
+const presenceStatusBox  = document.getElementById('presence-status');
+const presenceDot        = document.getElementById('presence-dot');
+const presenceStatusText = document.getElementById('presence-status-text');
+const presenceCamDot     = document.getElementById('presence-cam-dot');
+
+function setPresenceDot(state, label) {
+  const colors = { face: '#4ade80', noface: '#f87171', loading: '#facc15', off: '#555' };
+  const color = colors[state] || colors.off;
+  presenceDot.style.background = color;
+  presenceStatusText.textContent = label;
+  // Update robot body dot
+  if (state === 'face') {
+    presenceCamDot.style.background = '#4ade80';
+    presenceCamDot.style.boxShadow  = '0 0 8px 2px #4ade80';
+  } else if (state === 'noface') {
+    presenceCamDot.style.background = '#f87171';
+    presenceCamDot.style.boxShadow  = '0 0 6px 1px #f87171';
+  } else if (state === 'loading') {
+    presenceCamDot.style.background = '#facc15';
+    presenceCamDot.style.boxShadow  = '0 0 6px 1px #facc15';
+  } else {
+    presenceCamDot.style.background = '#555';
+    presenceCamDot.style.boxShadow  = 'none';
+  }
+}
+
+// Track face presence transitions for robot reactions
+let faceWasPresent = false;
+let faceGoneAt     = null;
+
+function onFaceAppeared() {
+  const awayMs = faceGoneAt ? Date.now() - faceGoneAt : 0;
+  faceGoneAt = null;
+  if (awayMs > 30000) {
+    // Away for more than 30 seconds — excited greeting
+    const msg = awayMs > 120000 ? 'Hey, welcome back!' : 'Oh hey, you\'re back!';
+    setMood('excited');
+    showBubble(msg, 'state-chat');
+    speak(msg);
+    setTimeout(() => setMood('idle'), 8000);
+  } else {
+    setMood('happy');
+    setTimeout(() => setMood('idle'), 4000);
+  }
+}
+
+function onFaceLost() {
+  faceGoneAt = Date.now();
+  setMood('concerned');
+  setTimeout(() => setMood('idle'), 5000);
+}
+
+async function populateCameras() {
+  try {
+    const tmp = await navigator.mediaDevices.getUserMedia({ video: true });
+    tmp.getTracks().forEach(t => t.stop());
+  } catch {}
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cams = devices.filter(d => d.kind === 'videoinput');
+    presenceCamSel.innerHTML = '';
+    cams.forEach((cam, i) => {
+      const opt = document.createElement('option');
+      opt.value = cam.deviceId;
+      opt.textContent = cam.label || `Camera ${i + 1}`;
+      presenceCamSel.appendChild(opt);
+    });
+    const saved = presenceSettings.cameraId;
+    if (saved && cams.some(c => c.deviceId === saved)) {
+      presenceCamSel.value = saved;
+    } else {
+      // Auto-prefer IR camera — works in dark, always present, designed for face detection
+      const ir = cams.find(c => /IR/i.test(c.label));
+      if (ir) {
+        presenceCamSel.value = ir.deviceId;
+        presenceSettings.cameraId = ir.deviceId;
+        savePresenceSettings(presenceSettings);
+      }
+    }
+  } catch (e) { console.error('[presence] enumerate cameras failed', e); }
+}
+
+presenceCamSel.addEventListener('change', () => {
+  presenceSettings.cameraId = presenceCamSel.value;
+  savePresenceSettings(presenceSettings);
+  if (presenceSettings.enabled) { stopPresenceDetection(); startPresenceDetection(); }
+});
+
+function fmtSec(s) {
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60), sec = s % 60;
+  return sec ? `${m}m ${sec}s` : `${m}m`;
+}
+
+function syncPresenceUI() {
+  presenceToggle.checked   = presenceSettings.enabled;
+  presenceSlider.value     = presenceSettings.timeoutSec;
+  presenceSecVal.textContent = fmtSec(presenceSettings.timeoutSec);
+}
+
+presenceToggle.addEventListener('change', () => {
+  presenceSettings.enabled = presenceToggle.checked;
+  savePresenceSettings(presenceSettings);
+  presenceStatusBox.style.display = presenceSettings.enabled ? 'flex' : 'none';
+  presenceCamDot.style.display    = presenceSettings.enabled ? 'block' : 'none';
+  if (presenceSettings.enabled) setPresenceDot('loading', 'loading model...');
+  applyPresenceSettings();
+});
+
+presenceSlider.addEventListener('input', () => {
+  presenceSettings.timeoutSec = parseInt(presenceSlider.value);
+  presenceSecVal.textContent = fmtSec(presenceSettings.timeoutSec);
+  savePresenceSettings(presenceSettings);
+});
+
+async function initFaceApi() {
+  if (typeof faceapi === 'undefined') {
+    setPresenceDot('noface', 'face-api.js not loaded (check network)');
+    return false;
+  }
+  try {
+    setPresenceDot('loading', 'downloading model...');
+    await faceapi.nets.tinyFaceDetector.loadFromUri('./models');
+    faceApiReady = true;
+    setPresenceDot('loading', 'model ready');
+    return true;
+  } catch (e) {
+    console.error('[presence] model load failed', e);
+    setPresenceDot('noface', `model failed: ${e.message}`);
+    return false;
+  }
+}
+
+async function startPresenceDetection() {
+  if (presenceStream) return;
+  if (!faceApiReady) { const ok = await initFaceApi(); if (!ok) return; }
+  try {
+    const videoConstraints = { width: 320, height: 240 };
+    if (presenceSettings.cameraId) videoConstraints.deviceId = { exact: presenceSettings.cameraId };
+    presenceStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
+    presenceVideo  = document.createElement('video');
+    presenceVideo.srcObject = presenceStream;
+    presenceVideo.autoplay  = true;
+    presenceVideo.muted     = true;
+    lastFaceSeen = Date.now();
+    setPresenceDot('loading', 'camera ready, detecting...');
+    presenceInterval = setInterval(runFaceCheck, 5000);
+  } catch (e) {
+    console.error('[presence] camera failed', e);
+    const msg = e.name === 'NotReadableError' || e.message?.includes('hardware')
+      ? 'camera in use by another app — retry'
+      : `camera error: ${e.name}`;
+    setPresenceDot('noface', msg + ' · ');
+    // Append inline retry link
+    const retry = document.createElement('span');
+    retry.textContent = '[retry]';
+    retry.style.cssText = 'color:#e05c2a;cursor:pointer;text-decoration:underline;';
+    retry.addEventListener('click', () => { stopPresenceDetection(); startPresenceDetection(); });
+    presenceStatusText.appendChild(retry);
+  }
+}
+
+function stopPresenceDetection() {
+  if (presenceInterval) { clearInterval(presenceInterval); presenceInterval = null; }
+  if (presenceStream)   { presenceStream.getTracks().forEach(t => t.stop()); presenceStream = null; }
+  presenceVideo = null;
+  faceWasPresent = false;
+  faceGoneAt = null;
+  setPresenceDot('off', 'off');
+  presenceStatusBox.style.display = 'none';
+  presenceCamDot.style.display    = 'none';
+}
+
+async function runFaceCheck() {
+  if (!presenceVideo || !faceApiReady || presenceVideo.readyState < 2) return;
+  try {
+    const detections = await faceapi.detectAllFaces(
+      presenceVideo,
+      new faceapi.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.4 })
+    );
+    if (detections.length > 0) {
+      lastFaceSeen = Date.now();
+      setPresenceDot('face', 'face detected');
+      if (!faceWasPresent) { faceWasPresent = true; onFaceAppeared(); }
+    } else {
+      if (faceWasPresent) { faceWasPresent = false; onFaceLost(); }
+      const away = Math.round((Date.now() - lastFaceSeen) / 1000);
+      const remaining = Math.max(0, presenceSettings.timeoutSec - away);
+      setPresenceDot('noface', remaining > 0 ? `no face — locking in ${fmtSec(remaining)}` : 'locking...');
+      if (away >= presenceSettings.timeoutSec) {
+        lastFaceSeen = Date.now();
+        window.electron.lockWorkstation();
+      }
+    }
+  } catch (e) { console.error('[presence] detection error', e); }
+}
+
+function applyPresenceSettings() {
+  presenceSettings.enabled ? startPresenceDetection() : stopPresenceDetection();
+}
+
+syncPresenceUI();
+presenceStatusBox.style.display = presenceSettings.enabled ? 'flex' : 'none';
+presenceCamDot.style.display    = presenceSettings.enabled ? 'block' : 'none';
+if (presenceSettings.enabled) setPresenceDot('loading', 'loading...');
+applyPresenceSettings();
+
+// --- VISCA over IP (Avkans PTZ camera auto-tracking toggle) ---
+window.electron.viscaInit();
+
+window.electron.onViscaTracking((enabled) => {
+  presenceSettings.enabled = enabled;
+  savePresenceSettings(presenceSettings);
+  syncPresenceUI();
+  presenceStatusBox.style.display = enabled ? 'flex' : 'none';
+  presenceCamDot.style.display    = enabled ? 'block' : 'none';
+  if (enabled) setPresenceDot('loading', 'loading...');
+  applyPresenceSettings();
+  showBubble(enabled ? 'Presence tracking ON' : 'Presence tracking OFF', 'state-chat');
+});
+
+window.electron.onViscaRaw((hex) => {
+  console.log('[visca-raw]', hex);
+});
 
 // --- Mic ---
 let listening = false;

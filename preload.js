@@ -27,4 +27,10 @@ contextBridge.exposeInMainWorld('electron', {
   saveFact: (fact) => ipcRenderer.invoke('save-fact', fact),
   deleteFact: (index) => ipcRenderer.invoke('delete-fact', index),
   clearMemory: () => ipcRenderer.invoke('clear-memory'),
+  lockWorkstation: () => ipcRenderer.send('lock-workstation'),
+  viscaInit: () => ipcRenderer.send('visca-init'),
+  viscaCommand: (payload) => ipcRenderer.send('visca-command', payload),
+  getViscaStatus: () => ipcRenderer.invoke('visca-status'),
+  onViscaTracking: (cb) => ipcRenderer.on('visca-tracking', (_, enabled) => cb(enabled)),
+  onViscaRaw: (cb) => ipcRenderer.on('visca-raw', (_, hex) => cb(hex)),
 });
